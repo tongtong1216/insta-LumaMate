@@ -1,37 +1,17 @@
-# Gradle
-.gradle/
-**/build/
-
-# Local Android SDK configuration
-local.properties
-
-# Android Studio / IntelliJ IDEA
-.idea/
 *.iml
-
-# Android build and native intermediates
-captures/
-.externalNativeBuild/
-.cxx/
-
-# Local secrets and signing files
-.env
-.env.*
-!.env.example
-secrets.properties
-*.jks
-*.keystore
-google-services.json
-
-# Logs and temporary files
-*.log
-*.tmp
-*.swp
-*.swo
-
-# OS files
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
 .DS_Store
-Thumbs.db
-Desktop.ini
-
-doc/
+/.vscode/settings.json
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/doc
