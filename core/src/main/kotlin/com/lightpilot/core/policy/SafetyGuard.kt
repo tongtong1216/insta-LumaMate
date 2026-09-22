@@ -41,9 +41,14 @@ class SafetyGuard(
                 nowEpochMs = nowEpochMs
             )
         }
-        if (commandId == null || commandId.isBlank()) {
-            return decision(false, SafetyReason.MISSING_COMMAND_ID, "Command id is required", proposal, nowEpochMs)
-        }
+        val normalizedCommandId = commandId?.takeIf { it.isNotBlank() }
+            ?: return decision(
+                false,
+                SafetyReason.MISSING_COMMAND_ID,
+                "Command id is required",
+                proposal,
+                nowEpochMs
+            )
         if (nowEpochMs > proposal.validUntilEpochMs) {
             return decision(false, SafetyReason.EXPIRED_PROPOSAL, "Proposal expired", proposal, nowEpochMs)
         }
@@ -80,7 +85,7 @@ class SafetyGuard(
         if (currentState.recordingState != RecordingState.IDLE) {
             return decision(false, SafetyReason.RECORDING, "Camera is not idle", proposal, nowEpochMs)
         }
-        if (commandId != null && executedCommands.contains(commandId)) {
+        if (executedCommands.contains(normalizedCommandId)) {
             return decision(false, SafetyReason.DUPLICATE_COMMAND, "Command was already evaluated", proposal, nowEpochMs)
         }
 
@@ -133,7 +138,7 @@ class SafetyGuard(
             PolicyAction.HOLD -> Unit
         }
 
-        commandId?.let(executedCommands::add)
+        executedCommands.add(normalizedCommandId)
         return decision(true, SafetyReason.ALLOWED, "Proposal passed safety checks", proposal, nowEpochMs)
     }
 

@@ -139,4 +139,21 @@ class PolicyEngineTest {
         assertEquals(PolicyAction.HOLD, proposal.action)
         assertEquals("scene_semantic_stale", proposal.reason)
     }
+
+    @Test
+    fun semanticFromAnotherIntentRevisionCannotDriveAProposal() {
+        val proposal = PolicyEngine().propose(
+            PolicyInput(
+                intent = TestFixtures.intent(revision = 4L),
+                metrics = TestFixtures.metrics(),
+                semantic = TestFixtures.semantic().copy(intentRevision = 3L),
+                cameraState = TestFixtures.cameraState(),
+                capabilities = TestFixtures.capabilities(),
+                nowEpochMs = TestFixtures.NOW
+            )
+        )
+
+        assertEquals(PolicyAction.HOLD, proposal.action)
+        assertEquals("scene_semantic_intent_mismatch", proposal.reason)
+    }
 }

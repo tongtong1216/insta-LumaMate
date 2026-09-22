@@ -1,6 +1,8 @@
 package com.lightpilot.core
 
 import com.lightpilot.core.model.PolicyAction
+import com.lightpilot.core.model.ExecutionMode
+import com.lightpilot.core.model.InputSource
 import com.lightpilot.core.policy.IntentPreset
 import com.lightpilot.core.policy.PolicyEngine
 import com.lightpilot.core.policy.PolicyInput
@@ -105,5 +107,24 @@ class PolicyScenarioTest {
 
         assertEquals(PolicyAction.HOLD, proposal.action)
         assertEquals("user_locked_parameters", proposal.reason)
+    }
+
+    @Test
+    fun mockInputsRemainExplicitlyMarkedAsMock() {
+        val proposal = engine.propose(
+            PolicyInput(
+                intent = UserIntentPresets.create(IntentPreset.SUBJECT_FIRST, revision = 1L),
+                metrics = TestFixtures.metrics(),
+                semantic = TestFixtures.semantic(),
+                cameraState = TestFixtures.cameraState(),
+                capabilities = TestFixtures.capabilities(),
+                nowEpochMs = TestFixtures.NOW,
+                inputSource = InputSource.MOCK,
+                executionMode = ExecutionMode.MOCK
+            )
+        )
+
+        assertEquals(InputSource.MOCK, proposal.inputSource)
+        assertEquals(ExecutionMode.MOCK, proposal.executionMode)
     }
 }

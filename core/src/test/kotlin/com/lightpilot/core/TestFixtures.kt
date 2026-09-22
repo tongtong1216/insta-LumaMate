@@ -7,6 +7,7 @@ import com.lightpilot.core.model.FrameSource
 import com.lightpilot.core.model.GrayFrame
 import com.lightpilot.core.model.RecordingState
 import com.lightpilot.core.model.SceneSemantic
+import com.lightpilot.core.model.ShutterSpeed
 import com.lightpilot.core.model.UserIntent
 import com.lightpilot.core.model.VisionMetrics
 
@@ -25,8 +26,8 @@ object TestFixtures {
             exposureProgram = exposureProgram,
             currentEv = currentEv,
             currentIso = 100,
-            currentShutterSpeed = null,
-            currentWhiteBalance = 5000,
+            currentShutterSpeed = ShutterSpeed(1.0, 60.0),
+            currentWhiteBalance = 3200,
             isWorking = isWorking,
             isPreRecording = false,
             isBusy = isBusy,
@@ -41,11 +42,21 @@ object TestFixtures {
     ): CameraCapabilities {
         return CameraCapabilities(
             supportedEv = supportedEv,
-            supportedShutterSpeed = emptyList(),
+            supportedShutterSpeed = listOf(
+                ShutterSpeed(1.0, 30.0),
+                ShutterSpeed(1.0, 60.0),
+                ShutterSpeed(1.0, 120.0)
+            ),
             supportedIso = listOf(100, 200, 400, 800),
             supportedWhiteBalance = listOf(3200, 5000, 6500),
             supportedExposurePrograms = listOf(ExposureProgram.AUTO),
-            supportParam = setOf("exposureBias", "exposureProgram"),
+            supportParam = setOf(
+                "exposureBias",
+                "exposureProgram",
+                "exposureShutterSpeed",
+                "ISO",
+                "whiteBalance"
+            ),
             capabilityRevision = 1L,
             capturedAtEpochMs = NOW
         )
@@ -78,7 +89,7 @@ object TestFixtures {
             brightRegionType = "window",
             coloredLight = false,
             uncertainty = 0.1f,
-            reason = if (available) "mock semantic" else "model_timeout",
+            reason = if (available) "mock semantic" else "timeout",
             sourceFrameId = frameId,
             receivedAtEpochMs = NOW,
             expiresAtEpochMs = NOW + 4_000L

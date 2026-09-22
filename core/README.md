@@ -22,6 +22,22 @@ UserIntent + VisionMetrics + SceneSemantic + CameraCapabilities
   -> PolicyProposal / SafetyDecision
 ```
 
+`PolicyCoordinator` is the single-frame orchestration entry point. It resets
+temporal state when intent, connection, or capability versions change, waits
+for the configured consecutive confirmations, and only then preflights the
+proposal with `SafetyGuard`.
+
+`CameraDataSource`, `PreviewFrameDataSource`, `CameraCommandExecutor`, and
+`SceneSemanticDataSource` are contract-only boundaries. The `core` module does
+not call the Insta360 SDK, an HTTP client, or an API key.
+
+The D v1 scene-analysis boundary is represented by
+`com.lightpilot.core.contract.v1.SceneAnalysisContract`. It maps the
+`frame_id`, `intent_revision`, `intent`, `image_base64`, and three normalized
+metrics from D's JSON request into an internal `SceneSemantic`. The adapter
+rejects mismatched frame or intent revisions and treats `mock` or
+`unavailable` responses as HOLD-safe unavailable semantics.
+
 This source tree is now the independent Gradle module `:core`. The Android
 application depends on it with `implementation(project(":core"))`.
 
@@ -58,6 +74,14 @@ An EV target must be the adjacent value in the camera-provided
 `SET_SHUTTER`, `SET_ISO`, and `SET_WHITE_BALANCE` are represented in the
 shared model but intentionally rejected by `SafetyGuard` until the P1/P2
 camera capabilities are verified.
+
+When `executionMode=MOCK`, the policy engine may create display-only
+advanced proposals from Mock capability lists. They remain ineligible for
+real execution and `SafetyGuard` rejects them.
+
+`ExecutionResult` is the shared A-to-B/C readback contract. A real adapter
+must distinguish SDK failure, timeout, unknown state, and a successful write
+whose readback value does not match the target.
 
 ## Debug scenarios
 

@@ -27,6 +27,25 @@ enum class InputSource {
     MOCK
 }
 
+enum class ExecutionMode {
+    REAL,
+    MOCK
+}
+
+enum class ExecutionStatus {
+    SUCCESS,
+    FAILED,
+    TIMEOUT,
+    UNKNOWN
+}
+
+enum class ReadbackStatus {
+    MATCHED,
+    MISMATCHED,
+    UNAVAILABLE,
+    UNKNOWN
+}
+
 enum class RiskLevel {
     LOW,
     MEDIUM,
@@ -192,10 +211,21 @@ data class SceneSemantic(
     val reason: String?,
     val sourceFrameId: String?,
     val receivedAtEpochMs: Long,
-    val expiresAtEpochMs: Long?
+    val expiresAtEpochMs: Long?,
+    val intentRevision: Long? = null,
+    val uncertaintyNotes: List<String> = emptyList(),
+    val analysisStatus: String? = null
 ) {
     init {
         uncertainty?.let { require(it in 0f..1f) }
+        uncertaintyNotes.forEach {
+            require(it.isNotBlank()) { "Uncertainty notes must not be blank" }
+        }
+        analysisStatus?.let {
+            require(it in setOf("ok", "mock", "unavailable")) {
+                "Unsupported scene analysis status"
+            }
+        }
     }
 }
 
@@ -250,7 +280,8 @@ data class PolicyProposal(
     val capabilityRevision: Long,
     val inputSource: InputSource,
     val createdAtEpochMs: Long,
-    val diagnostics: PolicyDiagnostics? = null
+    val diagnostics: PolicyDiagnostics? = null,
+    val executionMode: ExecutionMode = ExecutionMode.REAL
 )
 
 data class SafetyDecision(
@@ -259,6 +290,21 @@ data class SafetyDecision(
     val message: String,
     val checkedProposalId: String?,
     val checkedAtEpochMs: Long
+)
+
+data class ExecutionResult(
+    val commandId: String,
+    val proposalId: String,
+    val executionStatus: ExecutionStatus,
+    val beforeValue: ParameterTarget?,
+    val targetValue: ParameterTarget?,
+    val readbackValue: ParameterTarget?,
+    val readbackStatus: ReadbackStatus,
+    val errorCode: String?,
+    val connectionEpoch: String,
+    val capabilityRevision: Long,
+    val inputSource: InputSource,
+    val executionMode: ExecutionMode
 )
 
 private fun requireWeightsInRange(vararg values: Float) {

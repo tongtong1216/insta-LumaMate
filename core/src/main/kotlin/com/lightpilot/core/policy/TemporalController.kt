@@ -17,6 +17,7 @@ class TemporalController(
 ) {
     private var smoothed: VisionMetrics? = null
     private var pendingAction: PolicyAction? = null
+    private var pendingSignature: String? = null
     private var pendingCount = 0
     private var lastCommittedAtMs: Long? = null
 
@@ -47,7 +48,8 @@ class TemporalController(
     fun observe(
         metrics: VisionMetrics,
         candidateAction: PolicyAction,
-        nowEpochMs: Long
+        nowEpochMs: Long,
+        candidateSignature: String = candidateAction.name
     ): TemporalDecision {
         val filtered = smooth(metrics)
         if (candidateAction == PolicyAction.HOLD) {
@@ -71,8 +73,9 @@ class TemporalController(
             )
         }
 
-        if (candidateAction != pendingAction) {
+        if (candidateAction != pendingAction || candidateSignature != pendingSignature) {
             pendingAction = candidateAction
+            pendingSignature = candidateSignature
             pendingCount = 1
         } else {
             pendingCount++
@@ -105,6 +108,7 @@ class TemporalController(
 
     private fun resetPending() {
         pendingAction = null
+        pendingSignature = null
         pendingCount = 0
     }
 
