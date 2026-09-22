@@ -19,7 +19,10 @@ Android 模拟器运行在电脑上，适合验证 APK 安装、界面启动和�
 - `LightPilot_API_37` 已创建并启动，ADB 标识为 `emulator-5554`，系统 API 37、`arm64-v8a`。
 - `assembleDebug` 与 `assembleDebugAndroidTest` 构建成功。
 - 应用与测试 APK 安装均返回 `Success`，现有设备测试返回 `OK (1 test)`。
-- `MainActivity` 启动返回 `Status: ok`，截图与界面结构均确认显示 `Hello Android!`。
+- 2026-09-23：rc2 Debug APK 安装成功，`MainActivity` 启动返回 `Status: ok`，界面结构
+  确认显示 LightPilot P0 意图、指标和建议控件。
+- 默认平衡意图与测试指标连续提交三帧后显示
+  `EV_ONE_STEP_UP/target=1.0`；过期建议被 SafetyGuard 以 `EXPIRED` 拦截。
 - 从模拟器访问 `http://10.0.2.2:8000/health` 返回 HTTP 200，后端仍为 Mock 模式。
 - 最后一次设备检查仅出现模拟器，没有华为真机；尚不能确认华为手机的连接与运行兼容性。
 
@@ -64,7 +67,9 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 "$HOME/Library/Android/sdk/platform-tools/adb" -s DEVICE_SERIAL shell am start -W -n com.example.insta_auto_adjust/.MainActivity
 ```
 
-`install` 返回 `Success`，启动返回 `Status: ok`，手机上实际出现应用界面且没有崩溃，才能确认该真机可以安装和运行当前 APK。当前 Android 项目仍为 `Hello Android!` 模板，未加入相机或后端调用页面。
+`install` 返回 `Success`，启动返回 `Status: ok`，手机上实际出现应用界面且没有崩溃，
+才能确认该真机可以安装和运行当前 APK。当前项目已有 P0 本地策略界面和 rc2 后端客户端，
+但尚未加入已验证的 Insta360 SDK，因此模拟器或普通手机安装成功不能证明相机连接与 EV 写入成功。
 
 ## 本地后端地址
 

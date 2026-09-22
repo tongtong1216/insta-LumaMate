@@ -15,7 +15,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.schemas import AnalyzeSceneRequest, SceneSemantic
+from app.schemas import AnalyzeSceneRequest, Intent, SceneSemantic
 
 
 def video_duration(path: Path, ffprobe: str) -> float:
@@ -141,7 +141,11 @@ async def run(args) -> int:
                     request = AnalyzeSceneRequest(
                         frame_id=frame_id,
                         intent_revision=args.intent_revision,
-                        intent=args.intent,
+                        intent=Intent(
+                            exposure_priority=args.exposure_priority,
+                            stability_preference=args.stability_preference,
+                            source_text=args.intent or None,
+                        ),
                         image_base64=base64.b64encode(frame_path.read_bytes()).decode(),
                     )
                     response = await http.post(
@@ -170,11 +174,15 @@ async def run(args) -> int:
                 print(json.dumps(record, ensure_ascii=False), flush=True)
 
     report = {
-        "contract_version": "1.0.0-rc1",
+        "contract_version": "1.0.0-rc2",
         "video_file": args.video.name,
         "duration_ms": round(duration * 1000),
         "intent_revision": args.intent_revision,
-        "intent": args.intent,
+        "intent": {
+            "exposure_priority": args.exposure_priority,
+            "stability_preference": args.stability_preference,
+            "source_text": args.intent,
+        },
         "backend": {
             "mode": health.get("mode"),
             "model": health.get("model"),
@@ -196,6 +204,10 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=6, choices=range(1, 11),
                         help="Evenly sample 1-10 representative frames (default: 6)")
     parser.add_argument("--intent", default="保持主体清晰，同时保留现场光照氛围")
+    parser.add_argument("--exposure-priority",
+                        choices=["subject_detail", "highlight_detail", "balanced"],
+                        default="balanced")
+    parser.add_argument("--stability-preference", choices=["normal", "high"], default="normal")
     parser.add_argument("--intent-revision", type=int, default=1)
     parser.add_argument("--frame-start", type=int, default=1)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")

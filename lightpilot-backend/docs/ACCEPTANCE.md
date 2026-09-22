@@ -1,12 +1,15 @@
 # 后端验收记录
 
-验证日期：2026-09-22。环境：macOS Apple Silicon、Python 3.11.12，独立 `.venv`，依赖版本见 `requirements*.txt`。
+验证日期：2026-09-23。环境：macOS Apple Silicon、Python 3.11.12，独立 `.venv`，依赖版本见 `requirements*.txt`。
 
 ## 已完成
 
 | 检查 | 实际结果 |
 | --- | --- |
-| 自动化测试 `python -m pytest` | 62 passed |
+| 自动化测试 `python -m pytest` | 66 passed |
+| Android P0 单元测试与 Debug APK | 17 tests passed；`:app:assembleDebug` 通过 |
+| Android 模拟器运行 | 安装成功，`MainActivity` 启动 `Status: ok`，P0 控件可见 |
+| Android 三帧与过期保护 | 默认指标连续三帧得到 `EV_ONE_STEP_UP/target=1.0`；5 秒后执行被 `EXPIRED` 拦截 |
 | 依赖检查 `python -m pip check` | No broken requirements found |
 | Uvicorn 启动 | `127.0.0.1:8000`，startup complete |
 | 实际 HTTP `/health` | `status=ok`、`mode=bailian`、`model=qwen3.8-flash`、`model_configured=true` |
@@ -28,7 +31,18 @@
 
 真实图片排查：2358×1279、Display P3 JPEG 在 12 秒及临时 30 秒直连上限内均超时；等比例转换为 1280×694、sRGB、去元数据后约 22.4 秒成功。后端现会在内存中自动规范化长边超过 1280 像素或带 ICC 配置的图片，并将视觉调用超时调整为 30 秒。使用原始文件路径完成 HTTP 回归调用约 20.4 秒，识别为户外草地、多人、天空与白色衣物亮区、无彩色光。原图未被修改。失败汇总不再把全 null 字段标记为稳定。
 
-API v1 候选协议：`scene`、`subject_type`、`bright_region_type` 已改为固定枚举，`reason` 明确为非策略字段。Pydantic、模型提示词、OpenAPI、Mock 行为、README 和 `docs/API_CONTRACT_V1_CANDIDATE.md` 已同步；未定义标签会被拒绝为 `invalid_model_response`。同一真实图片调用成功返回 `outdoor_daylight / group / sky / false`，证明模型可遵守候选枚举。
+API v1 候选协议现为 `1.0.0-rc2`：请求改为结构化曝光优先级与稳定性，指标改为
+`subject_brightness/background_brightness/highlight_clipping_ratio/dark_ratio`。旧 rc1
+自由文本和 `highlight_ratio` 返回 422。`SceneSemantic` 响应枚举与非策略 `reason` 保持
+不变；Pydantic、模型输入、OpenAPI、Mock 行为、README、冒烟和视频脚本已同步。
+
+Android P0 已实现固定意图、BT.709 指标、单步 EV 策略、3/5 帧时序、低频语义缓存、
+SafetyGuard、FakeCameraAdapter、写后读回模型和演示界面。Fake 能力标记为 Mock 并由
+SafetyGuard 拒绝执行。该结果证明本地逻辑和 APK 可构建，不证明 Insta360 真机可写。
+
+Android Lint 未计入通过项：`lintDebug` 所需的 `intellij-core-32.4.0.jar` 和
+`kotlin-compiler-32.4.0.jar` 尚未下载到 Gradle 缓存，在线下载长时间无进展，离线运行明确
+报告缺少这两个工具依赖。编译、17 项单元测试、APK 安装和模拟器运行均独立通过。
 
 视频抽帧验收：新增 `scripts.video_probe`，依赖本机 FFmpeg，对本地视频均匀抽取 1–10 个临时 JPEG，顺序调用现有单帧接口，并输出每帧时间戳、协议有效性、枚举、原因、延迟和相邻成功帧的字段变化。整段视频不会上传，临时帧退出时删除，`test-results/` 已忽略。使用 2 秒无个人内容的合成测试视频完成一次真实百炼端到端调用，结果为 `other / display / display / true`，HTTP 200、`status=ok`、约 5.8 秒。
 
@@ -37,8 +51,8 @@ API v1 候选协议：`scene`、`subject_type`、`bright_region_type` 已改为�
 ## 仍需真实环境验收
 
 - 自有真实照片连续调用 3 次：单次真实照片已成功并检查语义，仍需连续 3 次确认字段稳定性。
-- B/C 对接确认：字段、语义标签用途、0–1 指标归一化及 HOLD/过期结果处理尚未由团队确认。
-- Android 到后端到百炼的完整链路：Android 当前仍是 UI 模板，尚未加入网络调用。
+- B/C 对接确认：rc2 类型已经在 Android 和后端实现，仍需团队在实际工作分支完成调用接线。
+- Android 到后端到百炼的完整链路：已有 rc2 客户端，尚未接入真实相机预览帧并做真机端到端调用。
 - 真实相机帧质量、SDK 操作和实际 EV 回读：属于 A/C 真机链路，后端测试无法替代。
 
 这些未验证项不应写成 PASS。按 README 中的图片与 HTTP 冒烟命令完成真实照片和 Android 联调后，将耗时、状态及稳定性观察补充到此记录；不要记录密钥或原始私密图片。

@@ -14,7 +14,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from app.bailian_client import BailianClient
 from app.config import Settings
-from app.schemas import MAX_IMAGE_BYTES, AnalyzeSceneRequest, SceneSemantic
+from app.schemas import MAX_IMAGE_BYTES, AnalyzeSceneRequest, Intent, SceneSemantic
 from app.service import FAILURE_REASONS, SceneService
 
 
@@ -30,7 +30,8 @@ def error_code(exc: Exception) -> str:
     return "check_failed"
 
 
-def make_request(image_path: Path | None, intent: str) -> AnalyzeSceneRequest:
+def make_request(image_path: Path | None, intent: str, exposure_priority: str,
+                 stability_preference: str) -> AnalyzeSceneRequest:
     if image_path:
         if image_path.stat().st_size > MAX_IMAGE_BYTES:
             raise ValueError("Image must be at most 4 MiB")
@@ -39,7 +40,11 @@ def make_request(image_path: Path | None, intent: str) -> AnalyzeSceneRequest:
         buffer = io.BytesIO()
         Image.new("RGB", (32, 32), (80, 100, 120)).save(buffer, format="PNG")
         raw = buffer.getvalue()
-    return AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent=intent,
+    return AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent=Intent(
+        exposure_priority=exposure_priority,
+        stability_preference=stability_preference,
+        source_text=intent or None,
+    ),
                                image_base64=base64.b64encode(raw).decode())
 
 
@@ -78,7 +83,12 @@ async def run(args) -> int:
     if args.kind == "vision" and not args.image:
         print("真实图片冒烟需要 --image /path/to/your/photo.jpg。")
         return 1
-    req = make_request(args.image, args.intent) if args.kind != "text" else None
+    req = make_request(
+        args.image,
+        args.intent,
+        getattr(args, "exposure_priority", "balanced"),
+        getattr(args, "stability_preference", "normal"),
+    ) if args.kind != "text" else None
     model = BailianClient(settings) if args.kind != "backend" else None
     passed = True
     observed_results = []
@@ -169,6 +179,10 @@ def main():
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--image", type=Path)
     parser.add_argument("--intent", default="保留现场光照氛围")
+    parser.add_argument("--exposure-priority",
+                        choices=["subject_detail", "highlight_detail", "balanced"],
+                        default="balanced")
+    parser.add_argument("--stability-preference", choices=["normal", "high"], default="normal")
     parser.add_argument("--repeat", type=int, default=3, choices=range(1, 11))
     parser.add_argument("--require-live", action="store_true",
                         help="Backend mode must be bailian; never accept Mock as an integration pass")

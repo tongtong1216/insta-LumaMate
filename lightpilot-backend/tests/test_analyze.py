@@ -124,17 +124,22 @@ def test_wall_clock_timeout(live_app, payload, semantic):
 
 @pytest.mark.parametrize("changes", [
     {"frame_id": -1}, {"frame_id": True}, {"frame_id": "42"},
-    {"intent_revision": -1}, {"intent": "   "}, {"intent": "x" * 1001},
+    {"intent_revision": -1}, {"intent": "旧版自由文本"},
+    {"intent": {"exposure_priority": "portrait", "stability_preference": "normal"}},
+    {"intent": {"exposure_priority": "balanced", "stability_preference": "fast"}},
+    {"intent": {"exposure_priority": "balanced", "stability_preference": "normal",
+                "source_text": "x" * 1001}},
     {"image_base64": "not base64"}, {"image_base64": base64.b64encode(b"not an image").decode()},
     {"metrics": {"dark_ratio": 1.1}}, {"metrics": {"subject_brightness": -0.1}},
-    {"metrics": {"highlight_ratio": "0.2"}}, {"extra": "unsupported"},
+    {"metrics": {"highlight_clipping_ratio": "0.2"}},
+    {"metrics": {"highlight_ratio": 0.2}}, {"extra": "unsupported"},
 ])
 def test_invalid_requests_do_not_echo_private_data(mock_app, payload, changes):
     data = dict(payload, **changes)
     response = mock_app.post(PATH, json=data)
     assert response.status_code == 422
     assert payload["image_base64"] not in response.text
-    assert payload["intent"] not in response.text
+    assert payload["intent"]["source_text"] not in response.text
     assert all("input" not in error for error in response.json()["detail"])
 
 
@@ -148,7 +153,11 @@ def test_image_data_url_and_mime_mismatch(mock_app, payload):
 def test_large_image_is_normalized_for_model_without_changing_request_contract():
     source = io.BytesIO()
     Image.new("RGB", (1600, 800), (90, 120, 150)).save(source, format="PNG")
-    request = AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent="测试",
+    request = AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent={
+                                      "exposure_priority": "balanced",
+                                      "stability_preference": "normal",
+                                      "source_text": "测试",
+                                  },
                                   image_base64=base64.b64encode(source.getvalue()).decode())
 
     assert request.image_data_url.startswith("data:image/jpeg;base64,")

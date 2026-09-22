@@ -21,6 +21,7 @@ Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。仅�
 - 健康检查：<http://127.0.0.1:8000/health>
 - 交互接口文档：<http://127.0.0.1:8000/docs>
 - OpenAPI 协议：<http://127.0.0.1:8000/openapi.json>
+- rc2 OpenAPI 快照：[docs/openapi-v1.0.0-rc2.json](docs/openapi-v1.0.0-rc2.json)
 
 `.env` 总是从此后端目录读取；同名进程环境变量优先。默认 `LIGHTPILOT_MODE=mock`，不会发起模型请求。修改 `.env` 后重启服务；不要依赖代码热重载检测 `.env`。
 
@@ -53,17 +54,25 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
 {
   "frame_id": 42,
   "intent_revision": 7,
-  "intent": "保留夜景氛围，同时让人物可辨认",
+  "intent": {
+    "exposure_priority": "highlight_detail",
+    "stability_preference": "normal",
+    "source_text": "保留夜景氛围，同时让人物可辨认"
+  },
   "image_base64": "这里替换为真实图片的Base64",
   "metrics": {
     "subject_brightness": 0.25,
-    "highlight_ratio": 0.05,
+    "background_brightness": 0.5,
+    "highlight_clipping_ratio": 0.05,
     "dark_ratio": 0.4
   }
 }
 ```
 
-编号必须为非负整数，支持 Android `Long` 正值范围。`intent` 为 1–1000 个字符。`metrics` 可省略或为 null，每个指标也可省略或为 null；本接口约定数值统一为 0–1，若 C 使用 0–255 亮度或百分数，发送前需归一化。此细化约定仍需与 B/C 对齐。
+编号必须为非负整数，支持 Android `Long` 正值范围。`intent` 使用 rc2 固定枚举；
+`source_text` 可省略或为 null，存在时为 1–1000 个字符。`metrics` 可省略或为 null，
+每个指标也可省略或为 null，数值统一为 0–1。rc1 的自由文本 `intent` 和
+`highlight_ratio` 不再兼容，会返回 422。指标的 BT.709 定义和完整字段约束见候选协议。
 
 图片支持纯 Base64，或 `data:image/jpeg;base64,...`、PNG/WebP 同类 data URL。Android 编码请使用 `Base64.NO_WRAP`。不支持远程图片 URL、动画或多帧图片。解码图片最多 4 MiB、1600 万像素，JSON 请求体最多 6 MiB；真实传入图片会在调用前校验格式、像素与可解码性。长边超过 1280 像素或带 ICC 色彩配置的图片，会在内存中转换为最长边 1280 像素的 sRGB JPEG 后再发送给模型；不修改或保存用户原图。
 
@@ -83,7 +92,11 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
 }
 ```
 
-`scene`、`subject_type`、`bright_region_type` 使用 API v1 候选协议中的固定枚举；`reason` 仅供展示、调试和人工验收，C 不得解析 `reason` 文本决定控制动作。无法确认的字段可以为 null。Android 必须先检查 `status == "ok"`，再核对 `frame_id` 和当前 `intent_revision`，并结合枚举、语义缺失项、指标与 `uncertainty` 交由本地 Policy Engine/Safety Guard 决策。服务端无会话状态，不会替客户端判断哪一帧已过期；所有响应编号由服务端绑定原始请求，模型无法覆盖。完整约定见 `docs/API_CONTRACT_V1_CANDIDATE.md`。
+`scene`、`subject_type`、`bright_region_type` 使用 API v1 rc2 候选协议中的固定枚举；
+`reason` 仅供展示、调试和人工验收，C 不得解析文本决定控制动作。Android 先检查
+`status == "ok"`，再核对 `frame_id` 和当前 `intent_revision`，将结果作为最长 60 秒的
+低频语义缓存；本地三帧/五帧确认不能连续请求模型。服务端无会话状态，不会替客户端
+判断哪一帧已过期。完整约定见 `docs/API_CONTRACT_V1_CANDIDATE.md`。
 
 | HTTP | 含义 | Android 处理 |
 | --- | --- | --- |
@@ -119,7 +132,9 @@ python -m scripts.smoke --require-live --image /path/to/your/photo.jpg
 # 显示每次经过校验的完整场景语义，并汇总字段稳定性与延迟
 python -m scripts.smoke --require-live --show-result --repeat 3 --image /path/to/your/photo.jpg
 # 从本地视频均匀抽取 6 帧，逐帧调用真实后端并生成 JSON 验收报告
-python -m scripts.video_probe --video /path/to/video.mp4 --samples 6 --output test-results/video-probe-report.json
+python -m scripts.video_probe --video /path/to/video.mp4 --samples 6 \
+  --exposure-priority balanced --stability-preference normal \
+  --output test-results/video-probe-report.json
 ```
 
 测试通过本地 HTTP 替身覆盖真实 SDK 适配路径，不调用云端。冒烟脚本默认只输出每次状态和耗时，失败退出码为 1。显式添加 `--show-result` 后会额外显示通过 Pydantic 校验的 `SceneSemantic`，以及 `scene`、`subject_type`、`bright_region_type`、`colored_light` 的多次稳定性汇总；只有全部请求成功且字段非空并一致时，`integration_passed` 才为 `true`。脚本仍不会打印密钥、图片、未经校验的模型原文或上游异常正文。自动化测试结果不能替代三次真实图片稳定性检查，详见 `docs/ACCEPTANCE.md`。

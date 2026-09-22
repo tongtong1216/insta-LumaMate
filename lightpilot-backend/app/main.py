@@ -73,7 +73,7 @@ def create_app(settings: Settings | None = None, *, client: BailianClient | None
             if model_client is not None:
                 await model_client.close()
 
-    app = FastAPI(title="LightPilot Backend", version="1.0.0-rc1", lifespan=lifespan,
+    app = FastAPI(title="LightPilot Backend", version="1.0.0-rc2", lifespan=lifespan,
                   description="Scene semantics only. Mock/unavailable results require Android HOLD.")
     app.add_middleware(RequestLimits)
 

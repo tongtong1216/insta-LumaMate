@@ -1,7 +1,8 @@
 from typing import get_args
 
 from app.bailian_client import SYSTEM_PROMPT
-from app.schemas import BrightRegionType, SceneLabel, SubjectType
+from app.schemas import (BrightRegionType, ExposurePriority, SceneLabel,
+                         StabilityPreference, SubjectType)
 
 
 EXPECTED_SCENES = {
@@ -25,6 +26,11 @@ def test_candidate_v1_enums_are_fixed_and_present_in_model_prompt():
         assert value in SYSTEM_PROMPT
 
 
+def test_rc2_intent_enums_are_fixed():
+    assert set(get_args(ExposurePriority)) == {"subject_detail", "highlight_detail", "balanced"}
+    assert set(get_args(StabilityPreference)) == {"normal", "high"}
+
+
 def test_openapi_exposes_fixed_response_enums(mock_app):
     schema = mock_app.get("/openapi.json").json()["components"]["schemas"]["SceneSemantic"]
 
@@ -42,3 +48,13 @@ def test_openapi_exposes_fixed_response_enums(mock_app):
     assert enum_values(properties["scene"]) == EXPECTED_SCENES
     assert enum_values(properties["subject_type"]) == EXPECTED_SUBJECTS
     assert enum_values(properties["bright_region_type"]) == EXPECTED_BRIGHT_REGIONS
+
+    request_schema = mock_app.get("/openapi.json").json()["components"]["schemas"]
+    intent = request_schema["Intent"]["properties"]
+    metrics = request_schema["Metrics"]["properties"]
+    assert enum_values(intent["exposure_priority"]) == {
+        "subject_detail", "highlight_detail", "balanced"}
+    assert enum_values(intent["stability_preference"]) == {"normal", "high"}
+    assert "highlight_clipping_ratio" in metrics
+    assert "background_brightness" in metrics
+    assert "highlight_ratio" not in metrics

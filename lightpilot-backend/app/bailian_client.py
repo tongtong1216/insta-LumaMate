@@ -46,9 +46,14 @@ class BailianClient:
 
     async def analyze(self, req: AnalyzeSceneRequest) -> ModelSemantic:
         context = json.dumps({
-            "intent": req.intent,
+            "intent": req.intent.model_dump(),
             "metrics": req.metrics.model_dump() if req.metrics else None,
             "metrics_scale": "normalized_0_to_1",
+            "metrics_definition": {
+                "brightness": "sRGB BT.709 normalized luminance",
+                "highlight_clipping_ratio": "fraction of pixels with luminance >= 0.98",
+                "dark_ratio": "fraction of pixels with luminance <= 0.12",
+            },
         }, ensure_ascii=False)
         response = await self.client.chat.completions.create(
             model=self.settings.model_id,

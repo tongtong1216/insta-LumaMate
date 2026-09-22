@@ -29,22 +29,31 @@ SubjectType = Literal[
 BrightRegionType = Literal[
     "none", "sky", "window", "display", "lamp", "specular_reflection", "mixed", "other",
 ]
+ExposurePriority = Literal["subject_detail", "highlight_detail", "balanced"]
+StabilityPreference = Literal["normal", "high"]
 
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
+class Intent(ContractModel):
+    exposure_priority: ExposurePriority
+    stability_preference: StabilityPreference
+    source_text: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
 class Metrics(ContractModel):
     subject_brightness: Ratio | None = None
-    highlight_ratio: Ratio | None = None
+    background_brightness: Ratio | None = None
+    highlight_clipping_ratio: Ratio | None = None
     dark_ratio: Ratio | None = None
 
 
 class AnalyzeSceneRequest(ContractModel):
     frame_id: Counter
     intent_revision: Counter
-    intent: str = Field(min_length=1, max_length=1000)
+    intent: Intent
     image_base64: str = Field(min_length=1, max_length=MAX_BASE64_LENGTH, repr=False)
     metrics: Metrics | None = None
     _image_mime: str = PrivateAttr(default="")

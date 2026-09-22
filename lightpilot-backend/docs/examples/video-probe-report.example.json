@@ -1,9 +1,13 @@
 {
-  "contract_version": "1.0.0-rc1",
+  "contract_version": "1.0.0-rc2",
   "video_file": "lightpilot-video-probe.mp4",
   "duration_ms": 2000,
   "intent_revision": 1,
-  "intent": "保持主体清晰，同时保留现场光照氛围",
+  "intent": {
+    "exposure_priority": "balanced",
+    "stability_preference": "normal",
+    "source_text": "保持主体清晰，同时保留现场光照氛围"
+  },
   "backend": {
     "mode": "bailian",
     "model": "qwen3.8-flash",
