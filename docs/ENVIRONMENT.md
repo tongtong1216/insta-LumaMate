@@ -56,6 +56,22 @@ Android Studio 2026.1 会根据该条件自动使用匹配的 Embedded JDK，因
 
 `local.properties` 会由 Android Studio 自动写入本机 SDK 路径；每个人的路径不同，不需要修改或提交它。
 
+### 2.4 macOS 终端环境
+
+如果 Android Studio 安装在默认位置，在项目根目录的终端执行：
+
+```sh
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+./gradlew :app:assembleDebug :app:testDebugUnitTest --console=plain
+```
+
+这些环境变量只影响当前终端，不会更改其他项目使用的全局 Java。新开终端后需重新执行以上 `export` 命令。SDK 安装在其他位置时，请同步调整 `ANDROID_HOME` 与 `local.properties` 中的 `sdk.dir`。
+
+构建成功后，调试 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`，单元测试报告位于 `app/build/reports/tests/testDebugUnitTest/index.html`。这两项验证不需要连接设备；安装启动与设备测试仍需要真机或已配置的模拟器。
+
 ## 3. 首次 Gradle Sync
 
 打开项目后 Android Studio 会自动执行 Gradle Sync。若需要手动触发，按 `Ctrl + Shift + A`，搜索并执行 `Sync Project with Gradle Files`。
@@ -115,6 +131,8 @@ BUILD SUCCESSFUL
 3. App 能被安装并打开，且没有崩溃，即通过。
 
 模拟器只用于确认 UI 和基础构建；相机连接、预览和 EV 调节必须使用真实 Android 手机与真实相机另行验证。
+
+本机模拟器与华为手机的连接、安装及排查步骤见 [DEVICE_TESTING.md](DEVICE_TESTING.md)。
 
 ## 5. 通过标准
 

@@ -314,6 +314,81 @@ internal_error
 `reason` 和 `uncertaintyNotes` 只能用于展示、日志和失效原因，不能通过关键词
 匹配来决定 EV、快门、ISO 或白平衡动作。
 
+### 4.4 Android HTTP 适配器
+
+Android 端新增了 D 后端 HTTP 适配器：
+
+```text
+app/src/main/java/com/example/insta_auto_adjust/network/DBackendSceneAnalysisClient.kt
+```
+
+它实现：
+
+```kotlin
+SceneAnalysisClient
+```
+
+只负责：
+
+```text
+AnalyzeSceneRequest
+→ POST /api/v1/analyze-scene
+→ AnalyzeSceneResponse
+```
+
+不负责策略计算，也不接触 API Key。真实调用必须放在后台线程中，例如：
+
+```kotlin
+val client = DBackendSceneAnalysisClient("http://127.0.0.1:8000")
+val dataSource = V1SceneSemanticDataSource(client)
+val semantic = withContext(Dispatchers.IO) {
+    dataSource.readSemantic(request, System.currentTimeMillis())
+}
+```
+
+地址选择：
+
+```text
+USB 真机 + adb reverse: http://127.0.0.1:8000
+Android 官方模拟器:     http://10.0.2.2:8000
+同一局域网真机:         http://电脑局域网IP:8000
+```
+
+App 已添加 `INTERNET` 权限和本地调试 HTTP 明文访问配置。
+
+### 4.5 无 B 页面时测试 D-C 联调
+
+如果暂时没有成员 B 的 UI，也可以直接跑 D-C Live Test。先启动 D 后端，
+并确认 `/health` 为 `mode=bailian`：
+
+```powershell
+cd "D:\Bold Maker\lightpilot-backend"
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+另开 PowerShell，在仓库根目录设置后端地址和测试图片：
+
+```powershell
+cd "D:\Bold Maker"
+$env:LIGHTPILOT_BACKEND_URL="http://127.0.0.1:8000"
+$env:LIGHTPILOT_TEST_IMAGE="C:\Users\wly\Desktop\微信图片_20260922235513_324_529.jpg"
+.\gradlew.bat :app:testDebugUnitTest --tests "*DBackendCoreIntegrationTest"
+```
+
+这个测试会执行：
+
+```text
+DBackendSceneAnalysisClient
+→ D /api/v1/analyze-scene
+→ V1SceneSemanticDataSource
+→ SceneSemantic
+→ PolicyEngine
+→ PolicyProposal
+```
+
+如果没有设置两个环境变量，测试会自动跳过，不影响普通构建。
+
 ## 5. `UserIntent`：C 需要和 B/D 统一的对象
 
 自然语言不应直接传给 `PolicyEngine`。B/D 可以把自然语言转换成受控的权重对象：
