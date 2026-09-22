@@ -125,3 +125,39 @@ BUILD SUCCESSFUL
 - Gradle Sync 显示 `BUILD SUCCESSFUL`，没有红色错误。
 - 空 App 能在模拟器或真机启动。
 - `gradle-wrapper.properties` 中没有任何个人本地磁盘路径。
+
+## 6. Insta360 Android SDK 2.1.5 获取与团队配置
+
+当前团队持有的 `SDK/Android-SDK-2.1.5/AndroidSDKDemo` 是官方 Demo 源码和可安装 APK，不是可直接提交或离线引用的 `sdk-camera` AAR 包。Demo 本身通过 Gradle 从影石官方 Maven 仓库解析：
+
+```text
+com.arashivision.sdk:sdk-camera:2.1.5
+```
+
+因此，成员首次构建主项目时必须能访问官方 Maven 仓库；Gradle 会将二进制包和传递依赖下载到该成员本机的用户级 Gradle 缓存，后续构建会复用缓存。
+
+主项目已配置官方仓库地址，并从以下任一**本机私有**来源读取认证信息：
+
+```text
+%USERPROFILE%\.gradle\gradle.properties
+```
+
+```properties
+insta360MavenUser=<官方提供的用户名>
+insta360MavenPassword=<官方提供的密码>
+```
+
+或当前终端的环境变量：
+
+```text
+INSTA360_MAVEN_USER
+INSTA360_MAVEN_PASSWORD
+```
+
+认证信息仅来自影石官方 SDK 包或团队安全渠道；不得写入项目文件、Git、APK、日志或聊天记录。`SDK/` 目录、Gradle 缓存和 AAR 文件也不得作为 Git 提交物。队友克隆项目后，应按相同方式配置自己的本机凭据并执行：
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+若需要无网络构建或大量成员高速下载，应由团队在确认影石 SDK 许可允许后配置受控的内部 Maven 缓存；不要从 Demo APK 提取 AAR 作为依赖。
