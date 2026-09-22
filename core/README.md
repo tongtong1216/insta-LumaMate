@@ -22,14 +22,17 @@ UserIntent + VisionMetrics + SceneSemantic + CameraCapabilities
   -> PolicyProposal / SafetyDecision
 ```
 
-When the Android project is created, this source tree can become either:
+This source tree is now the independent Gradle module `:core`. The Android
+application depends on it with `implementation(project(":core"))`.
 
-1. an independent Gradle module named `core`, or
-2. the source set under `app/src/main/java/com/lightpilot/core`.
+The tests use `kotlin.test` and can be run with:
 
-The tests use `kotlin.test` and are intended to run from the eventual Gradle
-project. This machine currently has Java but no standalone Kotlin compiler or
-Gradle command, so the source is not compiled in this step.
+```powershell
+.\gradlew.bat :core:test
+```
+
+The module targets JVM 11 so it can be consumed by the Android app while the
+Gradle daemon continues to run on the Android Studio JDK 25.
 
 ## P0 behavior
 

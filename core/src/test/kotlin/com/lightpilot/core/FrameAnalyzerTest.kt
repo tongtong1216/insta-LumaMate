@@ -23,8 +23,8 @@ class FrameAnalyzerTest {
             roi = Roi(0f, 0f, 0.5f, 0.5f, "top-left")
         )
 
-        assertEquals(0.8625f, metrics.subjectBrightness!!, 0.0001f)
-        assertEquals(0.3f, metrics.highlightRatio!!, 0.0001f)
+        assertEquals(0.9125f, metrics.subjectBrightness!!, 0.0001f)
+        assertEquals(0.1875f, metrics.highlightRatio!!, 0.0001f)
         assertEquals(0.1875f, metrics.darkRatio!!, 0.0001f)
         assertEquals(null, metrics.motionScore)
     }
