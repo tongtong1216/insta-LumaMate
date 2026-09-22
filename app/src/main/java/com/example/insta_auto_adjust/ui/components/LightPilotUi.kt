@@ -1,0 +1,151 @@
+package com.example.insta_auto_adjust.ui.components
+
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
+import com.example.insta_auto_adjust.ui.theme.PilotBlack
+import com.example.insta_auto_adjust.ui.theme.PilotGray
+import com.example.insta_auto_adjust.ui.theme.PilotInk
+import com.example.insta_auto_adjust.ui.theme.PilotLine
+import com.example.insta_auto_adjust.ui.theme.PilotWhite
+import com.example.insta_auto_adjust.ui.theme.PilotYellow
+
+val PilotSheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+val PilotControlShape = RoundedCornerShape(16.dp)
+
+@Composable
+fun BrandHeader(
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    showMock: Boolean = true
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = buildAnnotatedString {
+                    append("Light")
+                    withStyle(SpanStyle(color = PilotYellow)) { append("Pilot") }
+                },
+                style = MaterialTheme.typography.headlineMedium,
+                color = PilotWhite
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = PilotWhite.copy(alpha = 0.62f)
+            )
+        }
+        if (showMock) MockBadge()
+    }
+}
+
+@Composable
+fun MockBadge(text: String = "TEST / MOCK") {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = Color.Transparent,
+        modifier = Modifier.border(1.dp, PilotWhite.copy(alpha = 0.46f), RoundedCornerShape(50))
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = PilotWhite.copy(alpha = 0.82f)
+        )
+    }
+}
+
+@Composable
+fun WhiteSheet(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = PilotWhite,
+        contentColor = PilotInk,
+        shape = PilotSheetShape
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 24.dp),
+            content = { content() }
+        )
+    }
+}
+
+@Composable
+fun PrimaryAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth().heightIn(min = 54.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = PilotYellow,
+            contentColor = PilotBlack,
+            disabledContainerColor = PilotYellow.copy(alpha = 0.45f),
+            disabledContentColor = PilotBlack.copy(alpha = 0.55f)
+        )
+    ) {
+        Text(text, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+fun SectionEyebrow(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier = modifier, style = MaterialTheme.typography.labelMedium, color = PilotGray)
+}
+
+@Composable
+fun DataStrip(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = modifier.fillMaxWidth().border(1.dp, PilotLine, PilotControlShape).padding(vertical = 16.dp),
+        content = content
+    )
+}
+
+@Composable
+fun RowScope.DataValue(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.weight(1f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = PilotGray)
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            color = PilotInk,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}

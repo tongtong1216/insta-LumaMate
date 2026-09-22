@@ -1,22 +1,33 @@
 package com.example.insta_auto_adjust.ui.screen
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ReportUiState
+import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.DataStrip
+import com.example.insta_auto_adjust.ui.components.DataValue
+import com.example.insta_auto_adjust.ui.components.PrimaryAction
+import com.example.insta_auto_adjust.ui.components.SectionEyebrow
+import com.example.insta_auto_adjust.ui.components.WhiteSheet
+import com.example.insta_auto_adjust.ui.theme.PilotGray
+import com.example.insta_auto_adjust.ui.theme.PilotGreen
+import com.example.insta_auto_adjust.ui.theme.PilotInk
+import com.example.insta_auto_adjust.ui.theme.PilotWhite
 
 @Composable
 fun ReportScreen(
@@ -24,251 +35,95 @@ fun ReportScreen(
     onFinishClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Top
-    ) {
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // ---------------------------------------------------------
-        // 页面标题
-        // ---------------------------------------------------------
-
-        Text(
-            text = "LightPilot",
-            style = MaterialTheme.typography.headlineMedium
+    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        BrandHeader(
+            subtitle = "拍摄报告",
+            showMock = false,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
         )
+        Spacer(Modifier.height(26.dp))
 
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = "拍摄报告",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = if (reportState.isMock) {
-                "TEST / MOCK"
-            } else {
-                "REAL"
-            },
-            style = MaterialTheme.typography.labelMedium
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // ---------------------------------------------------------
-        // 用户意图
-        // ---------------------------------------------------------
-
-        Text(
-            text = "拍摄意图",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
+        WhiteSheet {
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-
                 Text(
-                    text = reportState.intentText
+                    text = "✓",
+                    modifier = Modifier.background(PilotGreen, CircleShape).padding(horizontal = 15.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = PilotWhite,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("流程完成", style = MaterialTheme.typography.headlineMedium, color = PilotInk)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = reportState.intentText.ifBlank { "本次拍摄流程已完成" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = PilotGray,
+                    textAlign = TextAlign.Center
                 )
             }
-        }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // ---------------------------------------------------------
-        // Proposal
-        // ---------------------------------------------------------
-
-        Text(
-            text = "本次建议",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-
-                Text(
-                    text = "Proposal：${reportState.proposalId}"
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Before EV：${formatEv(reportState.beforeEv)}"
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Target EV：${formatEv(reportState.targetEv)}"
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // ---------------------------------------------------------
-        // 执行证据
-        // ---------------------------------------------------------
-
-        Text(
-            text = "执行证据",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-
-                Text(
-                    text = when (reportState.sdkAck) {
-                        true -> "SDK ACK：SUCCESS"
-                        false -> "SDK ACK：FAILED"
-                        null -> "SDK ACK：UNKNOWN"
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Readback EV：${formatEv(reportState.readbackEv)}"
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // ---------------------------------------------------------
-        // 效果观察
-        // ---------------------------------------------------------
-
-        Text(
-            text = "效果观察",
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-
-                if (reportState.effectObservation != null) {
-
-                    Text(
-                        text = reportState.effectObservation
-                    )
-
-                } else {
-
-                    Text(
-                        text = "尚未进行拍后效果验证。"
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "参数回读成功不等于画面质量已经改善。",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // ---------------------------------------------------------
-        // Mock 提示
-        // ---------------------------------------------------------
-
-        if (reportState.isMock) {
-
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-
-                    Text(
-                        text = "TEST / MOCK"
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "本报告中的执行数据来自 Mock 流程，不代表真实相机已经完成参数修改。",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+            Spacer(Modifier.height(28.dp))
+            SectionEyebrow("参数记录")
+            Spacer(Modifier.height(8.dp))
+            DataStrip {
+                DataValue("调整前", formatEv(reportState.beforeEv))
+                DataValue("目标", formatEv(reportState.targetEv))
+                DataValue("实际回读", formatEv(reportState.readbackEv))
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-        }
-
-        // ---------------------------------------------------------
-        // 完成本次流程
-        // ---------------------------------------------------------
-
-        Button(
-            onClick = onFinishClick,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-
+            Spacer(Modifier.height(20.dp))
+            SectionEyebrow("执行证据")
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = "完成本次流程"
+                text = "SDK ACK ${ackText(reportState.sdkAck)}  ·  Proposal ${reportState.proposalId.ifBlank { "--" }}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = PilotInk
             )
-        }
+            Text(
+                text = reportState.effectObservation ?: "尚未进行拍后效果验证。",
+                style = MaterialTheme.typography.bodySmall,
+                color = PilotGray,
+                modifier = Modifier.padding(top = 6.dp)
+            )
 
-        Spacer(modifier = Modifier.height(32.dp))
+            if (reportState.isMock) {
+                Spacer(Modifier.height(24.dp))
+                MockBadgeOnWhite()
+                Text(
+                    text = "本报告来自模拟流程，不代表真实相机已经完成参数修改。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PilotGray,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            PrimaryAction("完成并返回", onFinishClick)
+        }
     }
 }
 
-private fun formatEv(
-    value: Double?
-): String {
+@Composable
+private fun MockBadgeOnWhite() {
+    Text(
+        text = "TEST / MOCK",
+        style = MaterialTheme.typography.labelMedium,
+        color = PilotGray
+    )
+}
 
-    if (value == null) {
-        return "--"
-    }
+private fun ackText(value: Boolean?): String = when (value) {
+    true -> "SUCCESS"
+    false -> "FAILED"
+    null -> "UNKNOWN"
+}
 
-    return if (value > 0) {
-        "+$value"
-    } else {
-        value.toString()
-    }
+private fun formatEv(value: Double?): String = when {
+    value == null -> "--"
+    value > 0 -> "+$value"
+    else -> value.toString()
 }
