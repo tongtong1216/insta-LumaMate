@@ -1,0 +1,7 @@
+# Locked from the tested Python 3.11 environment. Source ranges: requirements*.in
+-r requirements.txt
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+pygments==2.21.0
+pytest==9.1.1

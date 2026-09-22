@@ -12,9 +12,13 @@ Android 端的 LightPilot 原型项目。用户在 Android App 内完成相机�
 
 详细的团队环境要求见 [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)。
 
+## 后端
+
+FastAPI 后端位于 [lightpilot-backend/](lightpilot-backend/README.md)，提供 `/health` 与 `/api/v1/analyze-scene`。默认 Mock 模式可直接联调；配置百炼密钥、地址并切换模式后可分析真实图片。安装、启动、Android 连接方法和接口协议均见后端 README。
+
 ## 约定
 
-- 所有第三方依赖的版本统一维护在 `gradle/libs.versions.toml`。
+- Android 第三方依赖的版本统一维护在 `gradle/libs.versions.toml`；后端依赖锁定在 `lightpilot-backend/requirements*.txt`。
 - 使用 `gradlew` / `gradlew.bat` 构建，不安装或提交个人 Gradle 配置。
 - 不提交 `local.properties`、API Key、签名文件、APK 或构建产物。
 - Insta360 SDK 的版本、来源、相机型号与固件版本经团队确认后再接入。

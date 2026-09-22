@@ -1,0 +1,2 @@
+"""LightPilot scene semantics backend."""
+

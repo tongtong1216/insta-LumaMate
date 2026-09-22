@@ -1,0 +1,54 @@
+{
+  "contract_version": "1.0.0-rc1",
+  "video_file": "lightpilot-video-probe.mp4",
+  "duration_ms": 2000,
+  "intent_revision": 1,
+  "intent": "保持主体清晰，同时保留现场光照氛围",
+  "backend": {
+    "mode": "bailian",
+    "model": "qwen3.8-flash",
+    "model_configured": true
+  },
+  "frames": [
+    {
+      "frame_id": 1,
+      "timestamp_ms": 1000,
+      "protocol_valid": true,
+      "http_status": 200,
+      "status": "ok",
+      "error_code": null,
+      "result": {
+        "frame_id": 1,
+        "intent_revision": 1,
+        "status": "ok",
+        "scene": "other",
+        "subject_type": "display",
+        "bright_region_type": "display",
+        "colored_light": true,
+        "uncertainty": [
+          "画面为高饱和度的测试信号或数字图形，非真实物理场景"
+        ],
+        "reason": "图像呈现典型的SMPTE彩条测试图特征，包含红、绿、蓝、黄等高饱和度色块及左上角时间码，属于屏幕显示内容而非现实环境。"
+      },
+      "elapsed_ms": 5785
+    }
+  ],
+  "summary": {
+    "sampled_frames": 1,
+    "protocol_valid_frames": 1,
+    "successful_frames": 1,
+    "all_frames_ok": true,
+    "distinct_values": {
+      "scene": ["other"],
+      "subject_type": ["display"],
+      "bright_region_type": ["display"],
+      "colored_light": [true]
+    },
+    "transitions": [],
+    "elapsed_ms": {
+      "min": 5785,
+      "max": 5785,
+      "average": 5785
+    }
+  }
+}
