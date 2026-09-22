@@ -17,7 +17,7 @@
 | Kotlin | 2.2.10 |
 | Compose BOM | 2026.02.01 |
 | compileSdk / targetSdk | 37 / 37 |
-| minSdk | 24 |
+| minSdk | 29（Insta360 GO Ultra SDK 2.1.5 接入基线） |
 
 依赖版本以 `gradle/libs.versions.toml` 为准；Gradle 版本以 `gradle/wrapper/gradle-wrapper.properties` 为准。无需单独安装 Gradle。
 
