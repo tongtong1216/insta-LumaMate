@@ -4,256 +4,363 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.tooling.preview.Preview
-import com.example.insta_auto_adjust.policy.MockPolicyScenario
-import com.example.insta_auto_adjust.policy.LocalKeywordIntentResolver
-import com.example.insta_auto_adjust.policy.PolicyDemo
-import com.lightpilot.core.model.ParameterTarget
+import androidx.lifecycle.lifecycleScope
+import com.example.insta_auto_adjust.network.DBackendSceneAnalysisClient
+import com.example.insta_auto_adjust.network.DebugFrameImageFactory
+import com.example.insta_auto_adjust.policy.FrontendPolicyBridge
+import com.example.insta_auto_adjust.presentation.AppScreen
+import com.example.insta_auto_adjust.presentation.CameraUiState
+import com.example.insta_auto_adjust.presentation.ConnectionStatus
+import com.example.insta_auto_adjust.presentation.DataSource
+import com.example.insta_auto_adjust.presentation.ExecutionStatus
+import com.example.insta_auto_adjust.presentation.ExecutionUiState
+import com.example.insta_auto_adjust.presentation.PolicyProposalUi
+import com.example.insta_auto_adjust.presentation.ProposalDecision
+import com.example.insta_auto_adjust.presentation.ReportUiState
+import com.example.insta_auto_adjust.presentation.ShootingIntent
+import com.example.insta_auto_adjust.presentation.ShootingUiState
+import com.example.insta_auto_adjust.ui.screen.ConnectionScreen
+import com.example.insta_auto_adjust.ui.screen.ExecutionScreen
+import com.example.insta_auto_adjust.ui.screen.ReportScreen
+import com.example.insta_auto_adjust.ui.screen.ShootingScreen
 import com.example.insta_auto_adjust.ui.theme.InstaAutoAdjustTheme
+import com.lightpilot.core.contract.v1.AnalyzeSceneMetrics
+import com.lightpilot.core.contract.v1.AnalyzeSceneRequest
+import com.lightpilot.core.contract.v1.V1SceneSemanticDataSource
+import com.lightpilot.core.model.ParameterTarget
+import com.lightpilot.core.model.PolicyAction
+import com.lightpilot.core.model.PolicyProposal
+import com.lightpilot.core.model.SceneSemantic
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private val policyBridge = FrontendPolicyBridge()
+    private val sceneDataSource = V1SceneSemanticDataSource(
+        client = DBackendSceneAnalysisClient(D_BACKEND_BASE_URL)
+    )
+
+    private var currentScreen by mutableStateOf(AppScreen.CONNECTION)
+    private var intentRevision = 0L
+    private var frameSequence = 0L
+    private var activeCoreProposal: PolicyProposal? = null
+
+    private var cameraState by mutableStateOf(CameraUiState())
+    private var shootingState by mutableStateOf(ShootingUiState())
+    private var executionState by mutableStateOf(ExecutionUiState())
+    private var reportState by mutableStateOf(ReportUiState())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             InstaAutoAdjustTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    PolicyDemoScreen(
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    when (currentScreen) {
+                        AppScreen.CONNECTION -> ConnectionScreen(
+                            cameraState = cameraState,
+                            onConnectClick = ::handleConnectionClick,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                        )
+
+                        AppScreen.SHOOTING -> ShootingScreen(
+                            shootingState = shootingState,
+                            onIntentSelected = ::handleIntentSelected,
+                            onIntentTextChange = ::handleIntentTextChange,
+                            onAnalyzeClick = ::handleAnalysis,
+                            onAcceptProposal = ::handleAcceptProposal,
+                            onHoldProposal = ::handleHoldProposal,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                        )
+
+                        AppScreen.EXECUTION -> ExecutionScreen(
+                            executionState = executionState,
+                            onExecuteClick = ::handleMockExecution,
+                            onReportClick = ::handleOpenReport,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                        )
+
+                        AppScreen.REPORT -> ReportScreen(
+                            reportState = reportState,
+                            onFinishClick = ::handleFinishReport,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                        )
+                    }
                 }
             }
         }
     }
-}
 
-@Composable
-fun PolicyDemoScreen(modifier: Modifier = Modifier) {
-    val intentResolver = remember { LocalKeywordIntentResolver() }
-    val demoSession = remember { PolicyDemo.newSession() }
-    var selectedScenario by remember {
-        mutableStateOf<MockPolicyScenario?>(MockPolicyScenario.SUBJECT_FIRST)
-    }
-    var intentText by remember { mutableStateOf(MockPolicyScenario.SUBJECT_FIRST.sourceText) }
-    var resolution by remember {
-        mutableStateOf(
-            intentResolver.resolve(
-                sourceText = intentText,
-                revision = 1L,
-                nowEpochMs = System.currentTimeMillis()
-            )
+    private fun handleConnectionClick() {
+        cameraState = CameraUiState(
+            connectionStatus = ConnectionStatus.CONNECTED,
+            mode = "VIDEO",
+            currentEv = 0.0,
+            supportedEv = listOf(-2.0, -1.0, 0.0, 1.0, 2.0),
+            dataSource = DataSource.MOCK,
+            errorMessage = null
         )
+        currentScreen = AppScreen.SHOOTING
     }
-    var result by remember {
-        mutableStateOf(
-            demoSession.run(
-                intent = resolution.intent,
-                scenario = MockPolicyScenario.SUBJECT_FIRST
-            )
-        )
-    }
-    var runCount by remember { mutableStateOf(1) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-        .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("LightPilot C 策略演示")
-        Text("当前使用 Mock 数据，不连接真实相机，也不执行真实调参。")
-        Text("B 接收用户意图，C 只负责计算策略建议和安全判定。")
-        Text("三个场景是快捷预设，不是用户输入的全部范围。")
-        OutlinedTextField(
-            value = intentText,
-            onValueChange = { intentText = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("告诉助手你想优先拍好什么") },
-            placeholder = {
-                Text("例如：人脸要清楚，窗外天空不要过曝，夜景尽量少噪点")
-            },
-            minLines = 3
+    private fun handleIntentSelected(intent: ShootingIntent) {
+        shootingState = shootingState.copy(
+            selectedIntent = intent,
+            userIntent = null,
+            isAnalyzing = false,
+            visionMetrics = null,
+            sceneRisk = null,
+            proposal = null,
+            proposalDecision = null
         )
-        Button(
-            onClick = {
-                if (intentText.isNotBlank()) {
-                    val nextRun = runCount + 1
-                    val nextResolution = intentResolver.resolve(
-                        sourceText = intentText,
-                        revision = nextRun.toLong(),
-                        nowEpochMs = System.currentTimeMillis()
-                    )
-                    resolution = nextResolution
-                    selectedScenario = null
-                    runCount = nextRun
-                    result = demoSession.run(
-                        intent = nextResolution.intent,
-                        nowEpochMs = System.currentTimeMillis()
-                    )
-                }
-            }
-        ) {
-            Text("解析用户意图并生成策略")
-        }
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            MockPolicyScenario.entries.forEach { scenario ->
-                FilterChip(
-                    selected = selectedScenario == scenario,
-                    onClick = {
-                        val nextRun = runCount + 1
-                        selectedScenario = scenario
-                        intentText = scenario.sourceText
-                        runCount = nextRun
-                        val nextResolution = intentResolver.resolve(
-                            sourceText = scenario.sourceText,
-                            revision = nextRun.toLong(),
-                            nowEpochMs = System.currentTimeMillis()
-                        )
-                        resolution = nextResolution
-                        result = demoSession.run(
-                            intent = nextResolution.intent,
-                            scenario = scenario,
-                            nowEpochMs = System.currentTimeMillis()
-                        )
-                    },
-                    label = { Text(scenario.title) }
+        activeCoreProposal = null
+    }
+
+    private fun handleIntentTextChange(text: String) {
+        shootingState = shootingState.copy(
+            intentInputText = text,
+            userIntent = null,
+            isAnalyzing = false,
+            visionMetrics = null,
+            sceneRisk = null,
+            proposal = null,
+            proposalDecision = null
+        )
+        activeCoreProposal = null
+    }
+
+    private fun handleAnalysis() {
+        shootingState = shootingState.copy(isAnalyzing = true)
+
+        val now = System.currentTimeMillis()
+        val revision = ++intentRevision
+        val frameId = (++frameSequence).toString()
+        val stateSnapshot = shootingState
+        val draft = policyBridge.prepare(
+            shootingState = stateSnapshot,
+            revision = revision,
+            frameId = frameId,
+            nowEpochMs = now
+        )
+
+        lifecycleScope.launch {
+            val semantic = withContext(Dispatchers.IO) {
+                readSceneSemanticFromD(
+                    shootingState = stateSnapshot,
+                    revision = revision,
+                    frameId = frameId,
+                    nowEpochMs = now,
+                    draft = draft
                 )
             }
-        }
-        Text("当前入口：${result.scenario?.title ?: "自然语言意图"}")
-        result.scenario?.let { scenario ->
-            Text("预设说明：${scenario.description}")
-        }
-        Text("用户意图：${result.intent.sourceText ?: "未提供"}")
-        Text(
-            "意图解析：${resolution.resolverName}" +
-                if (resolution.usedFallback) {
-                    "，未识别明确偏好，按平衡意图处理"
+            val analysis = policyBridge.propose(
+                shootingState = stateSnapshot,
+                draft = draft,
+                semantic = semantic,
+                nowEpochMs = now,
+                supportedEv = cameraState.supportedEv
+            )
+            val proposal = analysis.coreProposal
+            activeCoreProposal = proposal
+
+            shootingState = shootingState.copy(
+                userIntent = analysis.userIntentUi,
+                isAnalyzing = false,
+                visionMetrics = analysis.visionMetricsUi,
+                sceneRisk = analysis.sceneRisk,
+                proposal = analysis.proposalUi,
+                proposalDecision = if (proposal.action == PolicyAction.HOLD) {
+                    ProposalDecision.HELD
                 } else {
-                    "，识别到：${resolution.matchedSignals.joinToString("、")}"
+                    ProposalDecision.PENDING
                 }
-        )
-        Text(
-            "画面指标：主体亮度 ${
-                result.metrics.subjectBrightness?.formatScore()
-            }，高光比例 ${
-                result.metrics.highlightRatio?.formatScore()
-            }，暗部比例 ${
-                result.metrics.darkRatio?.formatScore()
-            }"
-        )
-        Text(
-            "输入标记：input_source=${
-                result.proposal.inputSource.name.lowercase()
-            }，execution_mode=${
-                result.proposal.executionMode.name.lowercase()
-            }"
-        )
-        Text("策略动作：${result.proposal.action}")
-        Text("建议类型：${result.proposal.parameter.describeTarget()}")
-        if (result.proposal.executionMode == com.lightpilot.core.model.ExecutionMode.MOCK &&
-            result.proposal.action != com.lightpilot.core.model.PolicyAction.HOLD
-        ) {
-            Text("模拟建议：仅用于策略演示，尚未验证 GO Ultra SDK 能力")
-        }
-        Text("策略理由：${result.proposal.reason}")
-        Text("风险等级：${result.proposal.risk}")
-        Text(
-            "连续确认：${
-                result.temporalDecision?.reason ?: "未使用协调器"
-            }"
-        )
-        Text(
-            "是否允许真实执行：${
-                if (result.canRequestConfirmation) "是" else "否"
-            }"
-        )
-        Text("安全判定：${result.safetyDecision.reason}")
-        Text(result.safetyDecision.message)
-        result.proposal.diagnostics?.let { diagnostics ->
-            Text(
-                "评分：up=${diagnostics.upScore.formatScore()}，" +
-                    "down=${diagnostics.downScore.formatScore()}，" +
-                    "margin=${diagnostics.scoreMargin.formatScore()}"
             )
         }
-        Text("本地策略运行次数：$runCount")
-        (result.proposal.parameter as? ParameterTarget.Ev)?.let {
-            Text("建议 EV：${it.value}")
+    }
+
+    private fun readSceneSemanticFromD(
+        shootingState: ShootingUiState,
+        revision: Long,
+        frameId: String,
+        nowEpochMs: Long,
+        draft: com.example.insta_auto_adjust.policy.FrontendPolicyDraft
+    ): SceneSemantic {
+        return try {
+            val request = AnalyzeSceneRequest(
+                frameId = frameId.toLong(),
+                intentRevision = revision,
+                intent = draft.userIntent.sourceText ?: currentIntentText(),
+                imageBase64 = DebugFrameImageFactory.createBase64Jpeg(
+                    shootingState.selectedIntent
+                ),
+                metrics = AnalyzeSceneMetrics(
+                    subjectBrightness = draft.metrics.subjectBrightness,
+                    highlightRatio = draft.metrics.highlightRatio,
+                    darkRatio = draft.metrics.darkRatio
+                )
+            )
+            sceneDataSource.readSemantic(
+                request = request,
+                nowEpochMs = nowEpochMs
+            )
+        } catch (error: RuntimeException) {
+            unavailableSceneSemantic(
+                frameId = frameId,
+                revision = revision,
+                nowEpochMs = nowEpochMs,
+                reason = "d_backend_request_failed:${error.javaClass.simpleName}"
+            )
+        } catch (error: java.io.IOException) {
+            unavailableSceneSemantic(
+                frameId = frameId,
+                revision = revision,
+                nowEpochMs = nowEpochMs,
+                reason = "d_backend_request_failed:${error.javaClass.simpleName}"
+            )
         }
-        Button(
-            onClick = {
-                val nextRun = runCount + 1
-                runCount = nextRun
-                val nextResolution = intentResolver.resolve(
-                    sourceText = intentText,
-                    revision = nextRun.toLong(),
-                    nowEpochMs = System.currentTimeMillis()
-                )
-                resolution = nextResolution
-                selectedScenario = null
-                result = demoSession.run(
-                    intent = nextResolution.intent,
-                    nowEpochMs = System.currentTimeMillis()
-                )
+    }
+
+    private fun unavailableSceneSemantic(
+        frameId: String,
+        revision: Long,
+        nowEpochMs: Long,
+        reason: String
+    ): SceneSemantic {
+        return SceneSemantic(
+            available = false,
+            scene = null,
+            subjectType = null,
+            brightRegionType = null,
+            coloredLight = null,
+            uncertainty = 1.0f,
+            reason = reason,
+            sourceFrameId = frameId,
+            receivedAtEpochMs = nowEpochMs,
+            expiresAtEpochMs = null,
+            intentRevision = revision,
+            uncertaintyNotes = listOf("android_http_failed"),
+            analysisStatus = "unavailable"
+        )
+    }
+
+    private fun handleMockAnalysis() {
+        val now = System.currentTimeMillis()
+        val analysis = policyBridge.analyze(
+            shootingState = shootingState,
+            revision = ++intentRevision,
+            frameId = (++frameSequence).toString(),
+            supportedEv = cameraState.supportedEv,
+            nowEpochMs = now
+        )
+        val proposal = analysis.coreProposal
+        activeCoreProposal = proposal
+
+        shootingState = shootingState.copy(
+            userIntent = analysis.userIntentUi,
+            isAnalyzing = false,
+            visionMetrics = analysis.visionMetricsUi,
+            sceneRisk = analysis.sceneRisk,
+            proposal = analysis.proposalUi,
+            proposalDecision = if (proposal.action == PolicyAction.HOLD) {
+                ProposalDecision.HELD
+            } else {
+                ProposalDecision.PENDING
             }
-        ) {
-            Text("重新运行当前 Mock 策略")
+        )
+    }
+
+    private fun handleAcceptProposal() {
+        val proposal = activeCoreProposal ?: return
+        if (proposal.action == PolicyAction.HOLD) {
+            handleHoldProposal()
+            return
+        }
+
+        val targetEv = (proposal.parameter as? ParameterTarget.Ev)?.value
+        shootingState = shootingState.copy(
+            proposalDecision = ProposalDecision.ACCEPTED
+        )
+        executionState = ExecutionUiState(
+            proposalId = proposal.proposalId,
+            beforeEv = FrontendPolicyBridge.MOCK_BASE_EV,
+            targetEv = targetEv,
+            sdkAck = null,
+            readbackEv = null,
+            status = ExecutionStatus.IDLE,
+            errorMessage = null,
+            isMock = true
+        )
+        currentScreen = AppScreen.EXECUTION
+    }
+
+    private fun handleHoldProposal() {
+        shootingState = shootingState.copy(
+            proposalDecision = ProposalDecision.HELD
+        )
+    }
+
+    private fun handleMockExecution() {
+        val targetEv = executionState.targetEv
+        executionState = executionState.copy(
+            sdkAck = true,
+            readbackEv = targetEv,
+            status = ExecutionStatus.SUCCESS,
+            errorMessage = null,
+            isMock = true
+        )
+    }
+
+    private fun handleOpenReport() {
+        reportState = ReportUiState(
+            proposalId = executionState.proposalId.orEmpty(),
+            intentText = currentIntentText(),
+            beforeEv = executionState.beforeEv,
+            targetEv = executionState.targetEv,
+            sdkAck = executionState.sdkAck,
+            readbackEv = executionState.readbackEv,
+            isMock = true,
+            effectObservation = "当前为 Mock 执行回读，只验证 B 前端与 C 策略链路。"
+        )
+        currentScreen = AppScreen.REPORT
+    }
+
+    private fun handleFinishReport() {
+        shootingState = ShootingUiState()
+        executionState = ExecutionUiState()
+        reportState = ReportUiState()
+        activeCoreProposal = null
+        currentScreen = AppScreen.SHOOTING
+    }
+
+    private fun currentIntentText(): String {
+        return shootingState.intentInputText.ifBlank {
+            when (shootingState.selectedIntent) {
+                ShootingIntent.SUBJECT_PRIORITY -> "主体优先"
+                ShootingIntent.BALANCED -> "整体平衡"
+                ShootingIntent.HIGHLIGHT_PRIORITY -> "高光优先"
+                ShootingIntent.STABLE_EXPOSURE -> "稳定曝光"
+            }
         }
     }
-}
 
-private fun Float.formatScore(): String {
-    return "%.2f".format(this)
-}
-
-private fun ParameterTarget?.describeTarget(): String {
-    return when (this) {
-        null -> "无"
-        is ParameterTarget.Ev -> "EV ${value.formatDecimal()}"
-        is ParameterTarget.Shutter -> "快门 ${value.numerator.formatDecimal()}/${value.denominator.formatDecimal()}"
-        is ParameterTarget.Iso -> "ISO ${value}"
-        is ParameterTarget.WhiteBalance -> "白平衡 ${value}K"
-    }
-}
-
-private fun Double.formatDecimal(): String {
-    return if (this % 1.0 == 0.0) {
-        this.toInt().toString()
-    } else {
-        "%.2f".format(this)
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PolicyDemoPreview() {
-    InstaAutoAdjustTheme {
-        PolicyDemoScreen()
+    private companion object {
+        const val D_BACKEND_BASE_URL = "http://127.0.0.1:8000"
     }
 }
