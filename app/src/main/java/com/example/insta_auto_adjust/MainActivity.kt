@@ -27,7 +27,7 @@ import com.example.insta_auto_adjust.ui.screen.ExecutionScreen
 import com.example.insta_auto_adjust.ui.screen.ReportScreen
 import com.example.insta_auto_adjust.ui.screen.ShootingScreen
 import com.example.insta_auto_adjust.ui.theme.InstaAutoAdjustTheme
-
+import com.example.insta_auto_adjust.intent.LocalKeywordIntentResolver
 class MainActivity : ComponentActivity() {
 
     // =========================================================
@@ -127,6 +127,22 @@ class MainActivity : ComponentActivity() {
                                         proposalDecision = null
                                     )
                                 },
+                                onIntentTextChange = { text ->
+
+                                    shootingState = shootingState.copy(
+                                        intentInputText = text,
+
+                                        // 用户修改了意图，
+                                        // 原来的结构化意图与分析结果都应失效
+                                        userIntent = null,
+                                        visionMetrics = null,
+                                        sceneRisk = null,
+                                        proposal = null,
+                                        proposalDecision = null,
+                                        isAnalyzing = false
+                                    )
+                                },
+
 
                                 onAnalyzeClick = {
                                     handleMockAnalysis()
@@ -281,13 +297,25 @@ class MainActivity : ComponentActivity() {
         // ---------------------------------------------------------
         // 把分析结果交给 UI
         // ---------------------------------------------------------
-
+        val resolvedIntent =
+            LocalKeywordIntentResolver.resolve(
+                rawText = shootingState.intentInputText,
+                selectedIntent = shootingState.selectedIntent
+            )
         shootingState = shootingState.copy(
             isAnalyzing = false,
+
+            // B 解析得到的结构化用户意图
+            userIntent = resolvedIntent,
+
+            // 当前仍然是 Mock VisionMetrics
             visionMetrics = mockVisionMetrics,
+
             sceneRisk = "主体偏暗",
-            proposal = mockProposal,
-            proposalDecision = ProposalDecision.PENDING
+
+            // 当前 Proposal 暂时仍然是 Mock
+            // 下一阶段再替换成 C 的真实 PolicyEngine 输出
+            proposal = mockProposal
         )
     }
 

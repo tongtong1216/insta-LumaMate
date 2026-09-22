@@ -13,6 +13,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -25,6 +26,7 @@ import com.example.insta_auto_adjust.presentation.ShootingUiState
 fun ShootingScreen(
     shootingState: ShootingUiState,
     onIntentSelected: (ShootingIntent) -> Unit,
+    onIntentTextChange: (String) -> Unit,
     onAnalyzeClick: () -> Unit,
 
     // 用户接受当前建议
@@ -112,6 +114,29 @@ fun ShootingScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        OutlinedTextField(
+            value = shootingState.intentInputText,
+            onValueChange = onIntentTextChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = {
+                Text("描述你想要的拍摄效果")
+            },
+            placeholder = {
+                Text("例如：人物脸太暗了，但不要让天空过曝")
+            },
+            minLines = 2,
+            maxLines = 3
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "快捷意图",
+            style = MaterialTheme.typography.titleSmall
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         IntentButton(
             text = "主体优先",
             selected =
@@ -151,6 +176,19 @@ fun ShootingScreen(
                 )
             }
         )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        IntentButton(
+            text = "稳定曝光",
+            selected =
+                shootingState.selectedIntent ==
+                        ShootingIntent.STABLE_EXPOSURE,
+            onClick = {
+                onIntentSelected(
+                    ShootingIntent.STABLE_EXPOSURE
+                )
+            }
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -178,6 +216,55 @@ fun ShootingScreen(
                     "分析当前画面"
                 }
             )
+        }
+        shootingState.userIntent?.let { intent ->
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "结构化拍摄意图",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+
+                    Text(
+                        text = "主体优先权重：${toPercent(intent.subjectPriority)}"
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "高光保护权重：${toPercent(intent.highlightProtection)}"
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "曝光稳定权重：${toPercent(intent.stabilityPreference)}"
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "允许调整：${intent.allowedAdjustments.joinToString()}"
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "解析来源：${intent.source}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
 
         // -------------------------
@@ -434,6 +521,9 @@ private fun intentText(
 
         ShootingIntent.HIGHLIGHT_PRIORITY ->
             "高光优先"
+
+        ShootingIntent.STABLE_EXPOSURE ->
+            "稳定曝光"
     }
 }
 
