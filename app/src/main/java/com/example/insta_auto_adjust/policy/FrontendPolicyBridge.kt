@@ -21,6 +21,7 @@ import com.lightpilot.core.model.SceneSemantic
 import com.lightpilot.core.model.ShutterSpeed
 import com.lightpilot.core.model.UserIntent
 import com.lightpilot.core.model.VisionMetrics
+import com.lightpilot.core.policy.PolicyConfig
 import com.lightpilot.core.policy.PolicyEngine
 import com.lightpilot.core.policy.PolicyInput
 
@@ -40,23 +41,29 @@ data class FrontendPolicyDraft(
 )
 
 class FrontendPolicyBridge(
-    private val policyEngine: PolicyEngine = PolicyEngine()
+    private val policyEngine: PolicyEngine = PolicyEngine(
+        PolicyConfig(maxFrameAgeMs = REAL_ANALYSIS_WINDOW_MS)
+    )
 ) {
     fun prepare(
         shootingState: ShootingUiState,
         revision: Long,
         frameId: String,
-        nowEpochMs: Long
+        nowEpochMs: Long,
+        realMetrics: VisionMetrics? = null,
+        realMetricsUi: VisionMetricsUi? = null
     ): FrontendPolicyDraft {
         val userIntentUi = LocalKeywordIntentResolver.resolve(
             rawText = shootingState.intentInputText,
             selectedIntent = shootingState.selectedIntent
         )
-        val metricsUi = mockVisionMetrics(
-            intent = shootingState.selectedIntent,
-            frameId = frameId,
-            nowEpochMs = nowEpochMs
-        )
+        val metricsUi = realMetricsUi
+            ?: realMetrics?.toUi()
+            ?: mockVisionMetrics(
+                intent = shootingState.selectedIntent,
+                frameId = frameId,
+                nowEpochMs = nowEpochMs
+            )
         return FrontendPolicyDraft(
             userIntentUi = userIntentUi,
             visionMetricsUi = metricsUi,
@@ -65,7 +72,7 @@ class FrontendPolicyBridge(
                 revision = revision,
                 createdAtEpochMs = nowEpochMs
             ),
-            metrics = metricsUi.toCoreMetrics()
+            metrics = realMetrics ?: metricsUi.toCoreMetrics()
         )
     }
 
@@ -102,22 +109,26 @@ class FrontendPolicyBridge(
         draft: FrontendPolicyDraft,
         semantic: SceneSemantic,
         nowEpochMs: Long,
-        supportedEv: List<Double> = DEFAULT_SUPPORTED_EV
+        supportedEv: List<Double> = DEFAULT_SUPPORTED_EV,
+        cameraState: CameraState? = null,
+        capabilities: CameraCapabilities? = null,
+        inputSource: InputSource = InputSource.MOCK,
+        executionMode: ExecutionMode = ExecutionMode.MOCK
     ): FrontendPolicyResult {
         val proposal = policyEngine.propose(
             PolicyInput(
                 intent = draft.userIntent,
                 metrics = draft.metrics,
                 semantic = semantic,
-                cameraState = mockCameraState(),
-                capabilities = mockCapabilities(
+                cameraState = cameraState ?: mockCameraState(),
+                capabilities = capabilities ?: mockCapabilities(
                     supportedEv = supportedEv,
                     nowEpochMs = nowEpochMs
                 ),
                 nowEpochMs = nowEpochMs,
                 userLocked = shootingState.userLocked,
-                inputSource = InputSource.MOCK,
-                executionMode = ExecutionMode.MOCK
+                inputSource = inputSource,
+                executionMode = executionMode
             )
         )
 
@@ -253,9 +264,13 @@ class FrontendPolicyBridge(
     }
 
     private fun VisionMetricsUi.toCoreMetrics(): VisionMetrics {
+        return toCoreMetrics(FrameSource.MOCK)
+    }
+
+    private fun VisionMetricsUi.toCoreMetrics(source: FrameSource): VisionMetrics {
         return VisionMetrics(
             frameId = frameId,
-            source = FrameSource.MOCK,
+            source = source,
             roiVersion = roiVersion,
             subjectBrightness = subjectBrightness.toFloat(),
             backgroundBrightness = 0.65f,
@@ -264,6 +279,17 @@ class FrontendPolicyBridge(
             motionScore = null,
             capturedAtEpochMs = timestamp,
             expiresAtEpochMs = timestamp + 1_500L
+        )
+    }
+
+    private fun VisionMetrics.toUi(): VisionMetricsUi {
+        return VisionMetricsUi(
+            frameId = frameId,
+            subjectBrightness = (subjectBrightness ?: 0.5f).toDouble(),
+            highlightRatio = (highlightRatio ?: 0.0f).toDouble(),
+            darkRatio = (darkRatio ?: 0.0f).toDouble(),
+            roiVersion = roiVersion,
+            timestamp = capturedAtEpochMs
         )
     }
 
@@ -332,6 +358,7 @@ class FrontendPolicyBridge(
 
     companion object {
         const val MOCK_BASE_EV = 0.0
+        const val REAL_ANALYSIS_WINDOW_MS = 35_000L
         val DEFAULT_SUPPORTED_EV = listOf(-2.0, -1.0, 0.0, 1.0, 2.0)
     }
 }

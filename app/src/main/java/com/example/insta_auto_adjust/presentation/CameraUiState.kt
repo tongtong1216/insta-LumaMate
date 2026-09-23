@@ -19,5 +19,12 @@ data class CameraUiState(
     val currentEv: Double? = null,
     val supportedEv: List<Double> = emptyList(),
     val dataSource: DataSource = DataSource.MOCK,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val statusMessage: String? = null,
+    val scannedDevices: List<CameraDeviceUi> = emptyList()
+)
+
+data class CameraDeviceUi(
+    val name: String,
+    val address: String
 )

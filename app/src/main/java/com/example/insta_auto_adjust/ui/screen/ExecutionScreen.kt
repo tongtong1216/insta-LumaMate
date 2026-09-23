@@ -56,7 +56,7 @@ fun ExecutionScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "TEST / MOCK",
+            text = if (executionState.isMock) "TEST / MOCK" else "REAL CAMERA / SDK",
             style = MaterialTheme.typography.labelMedium
         )
 
@@ -277,10 +277,17 @@ fun ExecutionScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Text(
-                        text = "当前结果来自 TEST / MOCK 流程，不代表真实相机已经修改。",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    if (executionState.isMock) {
+                        Text(
+                            text = "当前结果来自 TEST / MOCK 流程，不代表真实相机已经修改。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    } else {
+                        Text(
+                            text = "真实 SDK ACK 与相机参数回读均已完成。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
 

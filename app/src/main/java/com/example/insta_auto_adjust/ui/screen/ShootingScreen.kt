@@ -1,6 +1,8 @@
 package com.example.insta_auto_adjust.ui.screen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,10 +19,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ProposalDecision
 import com.example.insta_auto_adjust.presentation.ShootingIntent
 import com.example.insta_auto_adjust.presentation.ShootingUiState
+import com.example.insta_auto_adjust.camera.insta360.Insta360PreviewController
+import com.example.insta_auto_adjust.ui.preview.RealCameraPreview
 
 @Composable
 fun ShootingScreen(
@@ -34,6 +40,8 @@ fun ShootingScreen(
 
     // 用户拒绝修改，保持当前参数
     onHoldProposal: () -> Unit,
+
+    previewController: Insta360PreviewController?,
 
     modifier: Modifier = Modifier
 ) {
@@ -66,9 +74,12 @@ fun ShootingScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Mock 必须明确标记
         Text(
-            text = "TEST / MOCK",
+            text = if (shootingState.dataSource.name == "REAL") {
+                "REAL CAMERA / D BACKEND / C POLICY"
+            } else {
+                "TEST / MOCK"
+            },
             style = MaterialTheme.typography.labelMedium
         )
 
@@ -83,21 +94,24 @@ fun ShootingScreen(
                 .fillMaxWidth()
                 .height(180.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-
-                Text(
-                    text = "相机预览",
-                    style = MaterialTheme.typography.titleSmall
+            if (previewController != null && shootingState.dataSource.name == "REAL") {
+                RealCameraPreview(
+                    controller = previewController,
+                    modifier = Modifier.fillMaxSize(),
                 )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "MOCK FRAME",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF20242A)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "相机已连接\n手机不显示预览\n分析时后台接入实时帧",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
         }
 
@@ -217,6 +231,11 @@ fun ShootingScreen(
                 }
             )
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "当前使用真实相机连接；点击分析后会从 GO Ultra 实时预览流截取一帧发送给 D，手机可以不显示预览。",
+            style = MaterialTheme.typography.bodySmall
+        )
         shootingState.userIntent?.let { intent ->
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -427,12 +446,27 @@ fun ShootingScreen(
 
                     Button(
                         onClick = onAcceptProposal,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = shootingState.proposalExecutable
                     ) {
-                        Text("接受建议")
+                        Text(
+                            if (shootingState.proposalExecutable) {
+                                "接受建议"
+                            } else {
+                                "接受建议（等待实时帧）"
+                            }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
+
+                    shootingState.proposalBlockReason?.let { reason ->
+                        Text(
+                            text = reason,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
 
                     OutlinedButton(
                         onClick = onHoldProposal,

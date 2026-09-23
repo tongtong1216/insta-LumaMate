@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -21,6 +22,7 @@ import com.example.insta_auto_adjust.presentation.ConnectionStatus
 fun ConnectionScreen(
     cameraState: CameraUiState,
     onConnectClick: () -> Unit,
+    onDeviceSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -99,6 +101,21 @@ fun ConnectionScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text("数据来源：${cameraState.dataSource}")
+
+                cameraState.statusMessage?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+
+                cameraState.scannedDevices.forEach { device ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { onDeviceSelected(device.address) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("${device.name} (${device.address})")
+                    }
+                }
             }
         }
 
@@ -111,7 +128,7 @@ fun ConnectionScreen(
             Text(
                 text = when (cameraState.connectionStatus) {
                     ConnectionStatus.DISCONNECTED -> "连接相机"
-                    ConnectionStatus.CONNECTING -> "模拟连接成功"
+                    ConnectionStatus.CONNECTING -> "扫描中..."
                     ConnectionStatus.CONNECTED -> "进入拍摄助手"
                     ConnectionStatus.ERROR -> "重新连接"
                 }

@@ -21,7 +21,7 @@ data class ReportUiState(
     val readbackEv: Double? = null,
 
     // 本次流程是否来自 Mock
-    val isMock: Boolean = true,
+    val isMock: Boolean = false,
 
     // 效果观察
     //

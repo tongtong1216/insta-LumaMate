@@ -493,6 +493,8 @@ class PolicyEngine(
     private fun supportsExposureBias(capabilities: CameraCapabilities): Boolean {
         return capabilities.supportParam.any {
             it.equals("exposureBias", ignoreCase = true) ||
+                it.equals("exposure_bias", ignoreCase = true) ||
+                it.equals("exposurebias", ignoreCase = true) ||
                 it.equals("EV", ignoreCase = true)
         }
     }
