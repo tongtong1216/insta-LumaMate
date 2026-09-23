@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
 
                             ShootingScreen(
                                 shootingState = shootingState,
-
+                                isCameraConnected = cameraState.isRealCameraConnected,
                                 onIntentSelected = { intent ->
 
                                     shootingState = shootingState.copy(
@@ -151,7 +151,9 @@ class MainActivity : ComponentActivity() {
                                 },
 
                                 onAnalyzeClick = {
-                                    handleMockAnalysis()
+                                    if (cameraState.isRealCameraConnected) {
+                                        handleMockAnalysis()
+                                    }
                                 },
 
                                 onAcceptProposal = {
@@ -163,6 +165,30 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBackClick = {
                                     currentScreen = AppScreen.CONNECTION
+                                },
+                                onPreviewContainerReady = { container ->
+                                    /*
+                                     * A/B Preview integration point.
+                                     *
+                                     * A 集成时在这里使用长期存活的
+                                     * CameraPreviewController：
+                                     *
+                                     * previewController.attach(container)
+                                     * previewController.start()
+                                     *
+                                     * B 不创建、不持有 Insta360 SDK player。
+                                     */
+                                },
+
+                                onPreviewContainerReleased = {
+                                    /*
+                                     * A 集成时：
+                                     *
+                                     * previewController.stop()
+                                     * previewController.detach()
+                                     *
+                                     * SDK player / pipeline 的实际释放由 A 负责。
+                                     */
                                 },
 
                                 modifier = Modifier
@@ -225,8 +251,8 @@ class MainActivity : ComponentActivity() {
     }
 
     // =========================================================
-    // Mock 相机连接
-    // =========================================================
+// 相机连接入口
+// =========================================================
 
     private fun handleConnectionClick() {
 
@@ -235,36 +261,49 @@ class MainActivity : ComponentActivity() {
             ConnectionStatus.DISCONNECTED,
             ConnectionStatus.ERROR -> {
 
+                /*
+                 * A/B 集成边界：
+                 *
+                 * 正式集成时，这里由 A 的长期存活
+                 * Insta360ConnectionController 发起真实连接流程：
+                 *
+                 * 1. initializeAndScan()
+                 * 2. 用户选择真实设备
+                 * 3. connectViaBluetoothWifi(...)
+                 * 4. 必要时 requestBleAuthorization()
+                 *
+                 * B 不再伪造 CONNECTED、EV、mode 或 supportedEv。
+                 *
+                 * 当前 B 分支没有 A 的 camera 模块，因此这里只进入
+                 * CONNECTING 展示状态，等待 A 集成真实 Controller。
+                 */
                 cameraState = cameraState.copy(
                     connectionStatus = ConnectionStatus.CONNECTING,
+                    dataSource = DataSource.UNAVAILABLE,
                     errorMessage = null
                 )
             }
 
             ConnectionStatus.CONNECTING -> {
-
-                cameraState = cameraState.copy(
-                    connectionStatus = ConnectionStatus.CONNECTED,
-                    mode = "VIDEO",
-                    currentEv = 0.0,
-                    supportedEv = listOf(
-                        -2.0,
-                        -1.0,
-                        0.0,
-                        1.0,
-                        2.0
-                    ),
-                    dataSource = DataSource.MOCK
-                )
+                /*
+                 * 不允许第二次点击直接伪造连接成功。
+                 *
+                 * CONNECTED 必须由 A 的真实 CameraConnectionState
+                 * 映射得到。
+                 */
             }
 
             ConnectionStatus.CONNECTED -> {
 
-                currentScreen = AppScreen.SHOOTING
+                /*
+                 * 只有真实相机连接状态才允许进入拍摄页。
+                 */
+                if (cameraState.isRealCameraConnected) {
+                    currentScreen = AppScreen.SHOOTING
+                }
             }
         }
     }
-
     // =========================================================
     // Mock 画面分析
     // =========================================================

@@ -41,6 +41,9 @@ import com.example.insta_auto_adjust.ui.theme.PilotInk
 import com.example.insta_auto_adjust.ui.theme.PilotLine
 import com.example.insta_auto_adjust.ui.theme.PilotWhite
 import com.example.insta_auto_adjust.ui.theme.PilotYellow
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.compose.ui.viewinterop.AndroidView
 
 @Composable
 fun ShootingScreen(
@@ -51,6 +54,14 @@ fun ShootingScreen(
     onAcceptProposal: () -> Unit,
     onHoldProposal: () -> Unit,
     onBackClick: () -> Unit,
+    isCameraConnected: Boolean,
+
+    // A/B Preview integration boundary:
+    // B only provides the Android ViewGroup container.
+    // A owns the SDK player / preview pipeline.
+    onPreviewContainerReady: (ViewGroup) -> Unit = {},
+    onPreviewContainerReleased: (ViewGroup) -> Unit = {},
+
     modifier: Modifier = Modifier
 ) {
     BottomAnchoredPage(
@@ -67,7 +78,11 @@ fun ShootingScreen(
             )
         },
         sheetContent = {
-            PreviewPanel()
+            PreviewPanel(
+                isCameraConnected = isCameraConnected,
+                onContainerReady = onPreviewContainerReady,
+                onContainerReleased = onPreviewContainerReleased,
+            )
             Spacer(Modifier.height(18.dp))
 
             OutlinedTextField(
@@ -99,9 +114,13 @@ fun ShootingScreen(
             Spacer(Modifier.height(18.dp))
 
             PrimaryAction(
-                text = if (shootingState.isAnalyzing) "分析中..." else "分析当前画面",
+                text = when {
+                    !isCameraConnected -> "相机未连接"
+                    shootingState.isAnalyzing -> "分析中..."
+                    else -> "分析当前画面"
+                },
                 onClick = onAnalyzeClick,
-                enabled = !shootingState.isAnalyzing
+                enabled = isCameraConnected && !shootingState.isAnalyzing
             )
 
             shootingState.userIntent?.let { intent ->
@@ -181,18 +200,50 @@ fun ShootingScreen(
 }
 
 @Composable
-private fun PreviewPanel() {
+private fun PreviewPanel(
+    isCameraConnected: Boolean,
+    onContainerReady: (ViewGroup) -> Unit,
+    onContainerReleased: (ViewGroup) -> Unit
+) {
     Box(
-        modifier = Modifier.fillMaxWidth().height(190.dp).background(PilotGraySoft, RoundedCornerShape(18.dp)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(190.dp)
+            .background(
+                PilotGraySoft,
+                RoundedCornerShape(18.dp)
+            ),
         contentAlignment = Alignment.Center
     ) {
-        Text("⌜     ⌝\n\n⌞     ⌟", color = PilotGray, textAlign = TextAlign.Center)
-        Text(
-            text = "MOCK FRAME",
-            modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = PilotGray
+        AndroidView(
+            modifier = Modifier.fillMaxWidth().height(190.dp),
+            factory = { context ->
+                FrameLayout(context).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+
+                    // B only provides the ViewGroup container.
+                    // A owns the real Insta360 player and preview pipeline.
+                    onContainerReady(this)
+                }
+            },
+            update = {
+                // Do not attach again during Compose recomposition.
+            },
+            onRelease = { container ->
+                onContainerReleased(container)
+            }
         )
+
+        if (!isCameraConnected) {
+            Text(
+                text = "相机未连接",
+                style = MaterialTheme.typography.labelMedium,
+                color = PilotGray
+            )
+        }
     }
 }
 
