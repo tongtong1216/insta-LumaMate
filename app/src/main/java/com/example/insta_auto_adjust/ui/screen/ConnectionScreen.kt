@@ -2,9 +2,11 @@ package com.example.insta_auto_adjust.ui.screen
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -13,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.CameraUiState
 import com.example.insta_auto_adjust.presentation.ConnectionStatus
 import com.example.insta_auto_adjust.presentation.DataSource
+import com.example.insta_auto_adjust.camera.insta360.BleCameraDevice
 import com.example.insta_auto_adjust.ui.components.BrandHeader
 import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
@@ -23,7 +26,9 @@ import com.example.insta_auto_adjust.ui.theme.PilotWhite
 @Composable
 fun ConnectionScreen(
     cameraState: CameraUiState,
+    scannedDevices: List<BleCameraDevice>,
     onConnectClick: () -> Unit,
+    onDeviceSelected: (BleCameraDevice) -> Unit,
     modifier: Modifier = Modifier
 ) {
     BottomAnchoredPage(
@@ -111,6 +116,24 @@ fun ConnectionScreen(
                 modifier = Modifier.padding(top = 6.dp),
                 style = MaterialTheme.typography.bodySmall
             )
+
+            if (scannedDevices.isNotEmpty()) {
+                Spacer(Modifier.height(18.dp))
+                Text(
+                    text = "发现的相机",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                scannedDevices.forEach { device ->
+                    OutlinedButton(
+                        onClick = { onDeviceSelected(device) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                    ) {
+                        Text("${device.name} (${device.address})")
+                    }
+                }
+            }
 
             cameraState.errorMessage?.let {
                 Spacer(Modifier.height(16.dp))

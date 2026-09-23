@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ProposalDecision
 import com.example.insta_auto_adjust.presentation.ShootingIntent
 import com.example.insta_auto_adjust.presentation.ShootingUiState
+import com.example.insta_auto_adjust.camera.preview.PreviewPhase
+import com.example.insta_auto_adjust.camera.preview.PreviewUiState
 import com.example.insta_auto_adjust.ui.components.NavigableBrandHeader
 import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
@@ -61,6 +63,7 @@ fun ShootingScreen(
     // A owns the SDK player / preview pipeline.
     onPreviewContainerReady: (ViewGroup) -> Unit = {},
     onPreviewContainerReleased: (ViewGroup) -> Unit = {},
+    previewState: PreviewUiState = PreviewUiState(),
 
     modifier: Modifier = Modifier
 ) {
@@ -80,6 +83,7 @@ fun ShootingScreen(
         sheetContent = {
             PreviewPanel(
                 isCameraConnected = isCameraConnected,
+                previewState = previewState,
                 onContainerReady = onPreviewContainerReady,
                 onContainerReleased = onPreviewContainerReleased,
             )
@@ -202,6 +206,7 @@ fun ShootingScreen(
 @Composable
 private fun PreviewPanel(
     isCameraConnected: Boolean,
+    previewState: PreviewUiState,
     onContainerReady: (ViewGroup) -> Unit,
     onContainerReleased: (ViewGroup) -> Unit
 ) {
@@ -237,14 +242,28 @@ private fun PreviewPanel(
             }
         )
 
-        if (!isCameraConnected) {
+        val status = previewStatusText(isCameraConnected, previewState)
+        if (status != null) {
             Text(
-                text = "相机未连接",
+                text = status,
                 style = MaterialTheme.typography.labelMedium,
                 color = PilotGray
             )
         }
     }
+}
+
+private fun previewStatusText(
+    isCameraConnected: Boolean,
+    previewState: PreviewUiState,
+): String? = when {
+    !isCameraConnected -> "相机未连接"
+    previewState.phase == PreviewPhase.RENDERING -> null
+    previewState.phase == PreviewPhase.FAILED || previewState.phase == PreviewPhase.DISCONNECTED ->
+        previewState.message ?: "真实预览不可用"
+    previewState.phase == PreviewPhase.STARTING -> "正在启动真实相机预览…"
+    previewState.phase == PreviewPhase.STOPPING -> "正在停止预览…"
+    else -> "正在准备真实相机预览…"
 }
 
 @Composable
