@@ -1,8 +1,13 @@
+import json
+from pathlib import Path
 from typing import get_args
 
-from app.bailian_client import SYSTEM_PROMPT
-from app.schemas import (BrightRegionType, ExposurePriority, SceneLabel,
-                         StabilityPreference, SubjectType)
+from app.bailian_client import INTENT_SYSTEM_PROMPT, SYSTEM_PROMPT
+from app.config import Settings
+from app.main import create_app
+from app.schemas import (AffectedField, BrightRegionType, ColorPriority,
+                         ExposurePriority, MotionPriority, SceneLabel,
+                         StabilityPreference, SubjectType, UncertaintyCode)
 
 
 EXPECTED_SCENES = {
@@ -29,6 +34,20 @@ def test_candidate_v1_enums_are_fixed_and_present_in_model_prompt():
 def test_rc2_intent_enums_are_fixed():
     assert set(get_args(ExposurePriority)) == {"subject_detail", "highlight_detail", "balanced"}
     assert set(get_args(StabilityPreference)) == {"normal", "high"}
+
+
+def test_rc3_multistage_and_uncertainty_enums_are_fixed_and_prompted():
+    for enum_type in (MotionPriority, ColorPriority, AffectedField):
+        for value in get_args(enum_type):
+            prompt = INTENT_SYSTEM_PROMPT if enum_type in (MotionPriority, ColorPriority) else SYSTEM_PROMPT
+            assert value in prompt
+    model_codes = {
+        "scene_uncertain", "subject_type_uncertain", "subject_occluded",
+        "bright_region_uncertain", "colored_light_uncertain", "image_blur",
+        "image_too_dark", "image_quality_uncertain", "other",
+    }
+    assert model_codes <= set(get_args(UncertaintyCode))
+    assert all(code in SYSTEM_PROMPT for code in model_codes)
 
 
 def test_openapi_exposes_fixed_response_enums(mock_app):
@@ -58,3 +77,9 @@ def test_openapi_exposes_fixed_response_enums(mock_app):
     assert "highlight_clipping_ratio" in metrics
     assert "background_brightness" in metrics
     assert "highlight_ratio" not in metrics
+
+
+def test_openapi_matches_rc3_snapshot():
+    snapshot = json.loads((Path(__file__).parents[1] / "docs" /
+                           "openapi-v1.0.0-rc3.json").read_text())
+    assert create_app(Settings()).openapi() == snapshot

@@ -22,12 +22,25 @@ class PolicyEngine(private val config: PolicyConfig = PolicyConfig()) {
         capabilities: CameraCapabilities,
         nowMs: Long,
     ): PolicyProposal {
-        if (semantic?.isPolicyUsable != true) {
+        val requiredFields = when (intent.exposurePriority) {
+            ExposurePriority.SUBJECT_DETAIL -> setOf(SemanticField.SCENE, SemanticField.SUBJECT_ROI)
+            ExposurePriority.HIGHLIGHT_DETAIL -> setOf(SemanticField.SCENE)
+            ExposurePriority.BALANCED -> if (
+                metrics.subjectBrightness != null &&
+                metrics.subjectBrightness < config.subjectVeryDarkBalanced &&
+                metrics.highlightClippingRatio < config.highlightBalancedRaiseLimit
+            ) setOf(SemanticField.SCENE, SemanticField.SUBJECT_ROI)
+            else setOf(SemanticField.SCENE)
+        }
+        if (semantic?.isUsableFor(requiredFields) != true) {
             return hold(intent, metrics, semantic, cameraState, capabilities, nowMs,
-                ReasonCode.SEMANTIC_UNAVAILABLE, "场景语义不可用，保持当前曝光", RiskLevel.HIGH)
+                ReasonCode.SEMANTIC_UNAVAILABLE,
+                "曝光策略依赖的场景字段不可用，保持当前曝光", RiskLevel.HIGH)
         }
         val subject = metrics.subjectBrightness
-        if (subject != null && subject < config.subjectDark &&
+        val subjectRoiUsable = semantic.isUsableFor(
+            setOf(SemanticField.SCENE, SemanticField.SUBJECT_ROI))
+        if (subjectRoiUsable && subject != null && subject < config.subjectDark &&
             metrics.highlightClippingRatio > config.highlightSubjectLimit) {
             return hold(intent, metrics, semantic, cameraState, capabilities, nowMs,
                 ReasonCode.EXPOSURE_CONFLICT, "主体偏暗且高光已经溢出，等待用户调整构图或光线", RiskLevel.HIGH)

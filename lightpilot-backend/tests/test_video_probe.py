@@ -34,6 +34,8 @@ def test_video_summary_records_enum_transitions():
 
     summary = build_video_summary(frames)
     assert summary["all_frames_ok"] is True
+    assert summary["contract_passed"] is True
+    assert all(summary["stage_usable"].values())
     assert summary["successful_frames"] == 2
     assert summary["distinct_values"]["scene"] == ["outdoor_daylight", "outdoor_backlit"]
     assert summary["transitions"] == [{

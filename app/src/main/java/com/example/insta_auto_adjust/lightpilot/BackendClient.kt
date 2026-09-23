@@ -2,10 +2,12 @@ package com.example.insta_auto_adjust.lightpilot
 
 import android.graphics.Bitmap
 import android.util.Base64
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 
 class BackendException(message: String) : Exception(message)
 
@@ -14,6 +16,15 @@ class LightPilotBackendClient(
     private val connectTimeoutMs: Int = 5_000,
     private val readTimeoutMs: Int = 35_000,
 ) {
+    fun parseIntent(sourceText: String, requestId: String = UUID.randomUUID().toString()): IntentParseResult {
+        require(sourceText.trim().length in 1..1000)
+        val body = JSONObject()
+            .put("request_id", requestId)
+            .put("source_text", sourceText)
+        val response = post("/api/v1/parse-intent", body)
+        return IntentResponseMapper.parse(jsonObjectToMap(JSONObject(response)), requestId)
+    }
+
     fun analyze(bitmap: Bitmap, intent: UserIntent, metrics: VisionMetrics): SceneSemantic {
         val image = ByteArrayOutputStream().use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream))
@@ -33,8 +44,11 @@ class LightPilotBackendClient(
                 .put("highlight_clipping_ratio", metrics.highlightClippingRatio)
                 .put("dark_ratio", metrics.darkRatio))
 
-        val connection = URL("${baseUrl.trimEnd('/')}/api/v1/analyze-scene")
-            .openConnection() as HttpURLConnection
+        return parseSceneSemantic(JSONObject(post("/api/v1/analyze-scene", body)))
+    }
+
+    private fun post(path: String, body: JSONObject): String {
+        val connection = URL("${baseUrl.trimEnd('/')}$path").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = connectTimeoutMs
@@ -43,8 +57,7 @@ class LightPilotBackendClient(
             connection.setRequestProperty("Content-Type", "application/json")
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             if (connection.responseCode != 200) throw BackendException("HTTP_${connection.responseCode}")
-            val response = connection.inputStream.bufferedReader().use { it.readText() }
-            return parseSceneSemantic(JSONObject(response))
+            return connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()
         }
@@ -57,6 +70,24 @@ class LightPilotBackendClient(
         val uncertainty = buildList {
             for (index in 0 until uncertaintyJson.length()) add(uncertaintyJson.getString(index))
         }
+        val detailsJson = json.optJSONArray("uncertainty_details")
+        val details = if (detailsJson == null) emptyList() else buildList {
+            for (index in 0 until detailsJson.length()) {
+                val detail = detailsJson.getJSONObject(index)
+                val code = UncertaintyCode.fromWire(detail.getString("code"))
+                    ?: throw BackendException("INVALID_UNCERTAINTY_CODE")
+                val severity = UncertaintySeverity.fromWire(detail.getString("severity"))
+                    ?: throw BackendException("INVALID_UNCERTAINTY_SEVERITY")
+                val affectsJson = detail.getJSONArray("affects")
+                val affects = buildSet {
+                    for (item in 0 until affectsJson.length()) {
+                        add(SemanticField.fromWire(affectsJson.getString(item))
+                            ?: throw BackendException("INVALID_UNCERTAINTY_AFFECT"))
+                    }
+                }
+                add(UncertaintyDetail(code, severity, affects, detail.getString("message")))
+            }
+        }
         return SceneSemantic(
             frameId = json.getLong("frame_id"),
             intentRevision = json.getLong("intent_revision"),
@@ -67,6 +98,7 @@ class LightPilotBackendClient(
             coloredLight = if (json.isNull("colored_light")) null else json.getBoolean("colored_light"),
             uncertainty = uncertainty,
             reason = if (json.isNull("reason")) null else json.getString("reason"),
+            uncertaintyDetails = details,
         )
     }
 
@@ -76,4 +108,21 @@ class LightPilotBackendClient(
     }
 
     private fun intentOrNull(value: Double?): Any = value ?: JSONObject.NULL
+
+    private fun jsonObjectToMap(json: JSONObject): Map<String, Any?> = buildMap {
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            put(key, jsonValue(json.get(key)))
+        }
+    }
+
+    private fun jsonValue(value: Any?): Any? = when (value) {
+        null, JSONObject.NULL -> null
+        is JSONObject -> jsonObjectToMap(value)
+        is JSONArray -> buildList {
+            for (index in 0 until value.length()) add(jsonValue(value.get(index)))
+        }
+        else -> value
+    }
 }

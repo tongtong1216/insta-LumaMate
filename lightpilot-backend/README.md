@@ -1,6 +1,7 @@
 # LightPilot 后端
 
-为 Android 提供场景语义分析。支持无需密钥的 Mock 联调，以及百炼 OpenAI-compatible 图片调用。仅返回 SceneSemantic；EV 策略与 Safety Guard 由 Android/C 负责，相机 SDK 执行由 A 负责。
+为 Android 提供多阶段意图解析和场景语义分析。支持无需密钥的 Mock 联调，以及百炼
+OpenAI-compatible 文本/图片调用。相机策略与 SafetyGuard 由 Android/C 负责，SDK 执行由 A 负责。
 
 ## 本机启动
 
@@ -21,7 +22,7 @@ Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。仅�
 - 健康检查：<http://127.0.0.1:8000/health>
 - 交互接口文档：<http://127.0.0.1:8000/docs>
 - OpenAPI 协议：<http://127.0.0.1:8000/openapi.json>
-- rc2 OpenAPI 快照：[docs/openapi-v1.0.0-rc2.json](docs/openapi-v1.0.0-rc2.json)
+- rc3 OpenAPI 快照：[docs/openapi-v1.0.0-rc3.json](docs/openapi-v1.0.0-rc3.json)
 
 `.env` 总是从此后端目录读取；同名进程环境变量优先。默认 `LIGHTPILOT_MODE=mock`，不会发起模型请求。修改 `.env` 后重启服务；不要依赖代码热重载检测 `.env`。
 
@@ -48,6 +49,19 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
 
 ## Android 接口协议 v1
 
+`POST /api/v1/parse-intent` 把用户原文解析为三个独立权重和固定枚举：
+
+```json
+{
+  "request_id": "24d45a9a-2f84-4c80-93c3-62e3c097ea5b",
+  "source_text": "夜间跑步时拍清楚人物，同时保留霓虹灯颜色"
+}
+```
+
+三个权重互相独立且必须位于 `[0,1]`；`>=0.50` 激活对应阶段。Android 严格校验模型
+JSON，让用户补全激活但 priority 为 null 的阶段，只有点击确认后才递增
+`intent_revision`。解析失败时进入手动选择，不生成相机动作。
+
 `POST /api/v1/analyze-scene`，`Content-Type: application/json`。
 
 ```json
@@ -69,7 +83,7 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
 }
 ```
 
-编号必须为非负整数，支持 Android `Long` 正值范围。`intent` 使用 rc2 固定枚举；
+编号必须为非负整数，支持 Android `Long` 正值范围。场景请求中的 `intent` 保留 rc2 固定枚举；
 `source_text` 可省略或为 null，存在时为 1–1000 个字符。`metrics` 可省略或为 null，
 每个指标也可省略或为 null，数值统一为 0–1。rc1 的自由文本 `intent` 和
 `highlight_ratio` 不再兼容，会返回 422。指标的 BT.709 定义和完整字段约束见候选协议。
@@ -88,11 +102,17 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
   "bright_region_type": "lamp",
   "colored_light": true,
   "uncertainty": ["主体部分遮挡"],
+  "uncertainty_details": [{
+    "code": "subject_occluded",
+    "severity": "warning",
+    "affects": ["subject_type", "subject_roi"],
+    "message": "主体部分遮挡"
+  }],
   "reason": "霓虹灯形成彩色照明"
 }
 ```
 
-`scene`、`subject_type`、`bright_region_type` 使用 API v1 rc2 候选协议中的固定枚举；
+`scene`、`subject_type`、`bright_region_type` 使用 API v1 固定枚举；
 `reason` 仅供展示、调试和人工验收，C 不得解析文本决定控制动作。Android 先检查
 `status == "ok"`，再核对 `frame_id` 和当前 `intent_revision`，将结果作为最长 60 秒的
 低频语义缓存；本地三帧/五帧确认不能连续请求模型。服务端无会话状态，不会替客户端
@@ -107,7 +127,10 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
 | 413 | 请求体过大 | 缩小代表帧，HOLD |
 | 415 | 非 JSON 请求 | 使用正确 Content-Type |
 
-`unavailable` 的 `uncertainty[0]` 是稳定错误码：`model_not_configured`、`timeout`、`rate_limited`、`authentication_failed`、`connection_failed`、`invalid_model_response`、`model_unavailable`、`backend_busy` 或 `internal_error`。此时语义字段均为 null。客户端网络错误、断连、其他 HTTP 错误也应 HOLD。
+rc2 客户端继续在 `uncertainty` 非空时整帧 HOLD。rc3 客户端读取
+`uncertainty_details`：`blocking` 或 `affects=["all"]` 全部 HOLD；warning 只阻断依赖字段的
+阶段。主体类别不确定不会阻断无关的阶段二运动策略，`colored_light` 不确定只阻断依赖
+彩色光的阶段三策略。
 
 ## 手机与模拟器联调
 
@@ -115,7 +138,8 @@ Base URL 必须是百炼控制台提供的 OpenAI-compatible 根地址，通常�
 - Android 官方模拟器：App 使用 `http://10.0.2.2:8000`。
 - 同一局域网真机：以 `--host 0.0.0.0` 启动，App 使用电脑局域网 IP，并放行本机端口。
 
-Android 需要 `INTERNET` 权限；本地 HTTP 需要在 **debug 构建**配置明文网络访问。当前 Android 模板还没有网络模块，本次未改动其界面或权限。后端默认仅监听本机且未包含用户鉴权，不应直接发布到公网；公网部署前增加访问认证、HTTPS 和网关限流。
+Android 已包含 `INTERNET` 权限、debug 明文网络配置和 rc3 客户端。后端默认仅监听本机且
+未包含用户鉴权，不应直接发布到公网；公网部署前增加访问认证、HTTPS 和网关限流。
 
 ## 验证
 
@@ -126,6 +150,9 @@ python -m pip check
 python -m scripts.smoke
 # 以下两项会实际调用百炼并产生用量，需要自己的密钥和图片
 python -m scripts.smoke --kind text
+# 经过 rc3 后端验证三阶段意图解析（三次真实百炼调用）
+python -m scripts.smoke --kind intent --expect-all-stages --show-result --repeat 3 \
+  --intent "夜间跑步时拍清楚人物，同时保留霓虹灯颜色"
 python -m scripts.smoke --kind vision --image /path/to/your/photo.jpg
 # 经过 HTTP 后端验证真实图片（先将服务切到 bailian 模式并重启）
 python -m scripts.smoke --require-live --image /path/to/your/photo.jpg
@@ -135,11 +162,24 @@ python -m scripts.smoke --require-live --show-result --repeat 3 --image /path/to
 python -m scripts.video_probe --video /path/to/video.mp4 --samples 6 \
   --exposure-priority balanced --stability-preference normal \
   --output test-results/video-probe-report.json
+# 使用三份真实代表图片完成 D 的三阶段统一验收，每份连续调用三次
+python -m scripts.three_stage_probe \
+  --stage1-image /path/to/backlit.jpg \
+  --stage2-image /path/to/motion.jpg \
+  --stage3-image /path/to/colored-light.jpg \
+  --repeat 3 --expect-stage3-colored-light \
+  --output test-results/d-three-stage-report.json
 ```
 
 测试通过本地 HTTP 替身覆盖真实 SDK 适配路径，不调用云端。冒烟脚本默认只输出每次状态和耗时，失败退出码为 1。显式添加 `--show-result` 后会额外显示通过 Pydantic 校验的 `SceneSemantic`，以及 `scene`、`subject_type`、`bright_region_type`、`colored_light` 的多次稳定性汇总；只有全部请求成功且字段非空并一致时，`integration_passed` 才为 `true`。脚本仍不会打印密钥、图片、未经校验的模型原文或上游异常正文。自动化测试结果不能替代三次真实图片稳定性检查，详见 `docs/ACCEPTANCE.md`。
 
-`scripts.video_probe` 不把整段视频发送给后端。它使用本机 FFmpeg 抽取临时 JPEG，顺序调用现有单帧接口，结束时删除临时帧，只保存指定的 JSON 报告。报告包含每个采样时间点的枚举、`reason`、延迟、失败码和相邻成功帧的字段变化；视频内容变化导致的合法枚举切换不应被误判为接口不稳定。
+`scripts.video_probe` 不把整段视频发送给后端。它使用本机 FFmpeg 抽取临时 JPEG，顺序
+调用单帧接口，结束时删除临时帧，只保存指定的 JSON 报告。报告分别输出
+`contract_passed`、各阶段 `stage_usable` 和 `field_stability`；阶段二不会因无关的主体类别
+或彩色光波动直接失败。
+
+D 的完整三阶段素材选择、报告字段、通过标准和与 C 的职责边界见
+[D_THREE_STAGE_TEST_GUIDE.md](docs/D_THREE_STAGE_TEST_GUIDE.md)。
 
 ### 怎样确认 qwen3.8-flash 已接入
 

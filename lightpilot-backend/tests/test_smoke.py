@@ -102,3 +102,36 @@ def test_failed_results_are_never_reported_as_stable():
     assert summary["successful"] == 0
     assert summary["integration_passed"] is False
     assert not any(summary["stable_fields"].values())
+
+
+def test_intent_probe_validates_three_active_stages(monkeypatch, capsys):
+    real_client = httpx.AsyncClient
+
+    def server(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok", "mode": "bailian",
+                                            "model_configured": True, "model": "qwen3.8-flash"})
+        body = json.loads(request.content)
+        return httpx.Response(200, json={
+            "request_id": body["request_id"], "status": "ok",
+            "intent": {
+                "weights": {"exposure": 0.8, "motion_noise": 0.95,
+                            "color_atmosphere": 0.85},
+                "exposure_priority": "subject_detail",
+                "motion_priority": "motion_clarity",
+                "color_priority": "colored_light_preservation",
+                "stability_preference": "high",
+            },
+            "ambiguities": [], "reason": "三阶段",
+        })
+
+    monkeypatch.setattr(smoke.Settings, "from_env", lambda: Settings())
+    monkeypatch.setattr(smoke.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(server), **kwargs))
+    args = argparse.Namespace(
+        kind="intent", image=None, intent="夜跑保留霓虹", repeat=1,
+        base_url="http://backend.test", require_live=True, show_result=True,
+        expect_all_stages=True,
+    )
+    assert asyncio.run(smoke.run(args)) == 0
+    assert '"passed": true' in capsys.readouterr().out

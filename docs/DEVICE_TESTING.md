@@ -68,7 +68,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ```
 
 `install` 返回 `Success`，启动返回 `Status: ok`，手机上实际出现应用界面且没有崩溃，
-才能确认该真机可以安装和运行当前 APK。当前项目已有 P0 本地策略界面和 rc2 后端客户端，
+才能确认该真机可以安装和运行当前 APK。当前项目已有多阶段策略界面和 rc3 后端客户端，
 但尚未加入已验证的 Insta360 SDK，因此模拟器或普通手机安装成功不能证明相机连接与 EV 写入成功。
 
 ## 本地后端地址

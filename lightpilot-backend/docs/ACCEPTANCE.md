@@ -4,6 +4,22 @@
 
 ## 已完成
 
+### rc3 本地实现验证（2026-09-23）
+
+- 后端 rc3 自动化：94 项测试通过，`pip check` 无破损依赖。
+- Android：45 项单元测试通过，`:app:assembleDebug` 成功。
+- OpenAPI 快照 `openapi-v1.0.0-rc3.json` 与运行时 schema 完全一致。
+- 已覆盖 `/parse-intent` 三个独立权重、边界、非数字/布尔/缺失/额外字段、模型注入，
+  以及已激活 priority 缺失时的手动补选。
+- 已覆盖结构化不确定性、rc2 整帧 HOLD 兼容、阶段字段级降级、三/五帧确认、分数冲突、
+  最高目标阻断、每轮单动作和阶段二/三 `MOCK/planning_only` 拦截。
+- rc3 `/parse-intent` 已用真实百炼连续调用 3 次：全部 HTTP 200/`status=ok`，三个阶段均
+  激活，固定 priority 三次一致；延迟约 5023 / 4810 / 3919 ms。权重存在小幅波动，需以
+  用户最终确认值为准。
+- 新版结构化图片提示已用 `IMG_1665.MOV` 中点代表帧真实调用 1 次：HTTP 200、
+  `status=ok`、三个阶段 `stage_usable=true`、`uncertainty_details=[]`，约 24787 ms。报告为
+  `test-results/rc3-one-frame-video-report.json`；仍需三类素材各连续三次完成正式稳定性验收。
+
 | 检查 | 实际结果 |
 | --- | --- |
 | 自动化测试 `python -m pytest` | 66 passed |
@@ -31,10 +47,9 @@
 
 真实图片排查：2358×1279、Display P3 JPEG 在 12 秒及临时 30 秒直连上限内均超时；等比例转换为 1280×694、sRGB、去元数据后约 22.4 秒成功。后端现会在内存中自动规范化长边超过 1280 像素或带 ICC 配置的图片，并将视觉调用超时调整为 30 秒。使用原始文件路径完成 HTTP 回归调用约 20.4 秒，识别为户外草地、多人、天空与白色衣物亮区、无彩色光。原图未被修改。失败汇总不再把全 null 字段标记为稳定。
 
-API v1 候选协议现为 `1.0.0-rc2`：请求改为结构化曝光优先级与稳定性，指标改为
-`subject_brightness/background_brightness/highlight_clipping_ratio/dark_ratio`。旧 rc1
-自由文本和 `highlight_ratio` 返回 422。`SceneSemantic` 响应枚举与非策略 `reason` 保持
-不变；Pydantic、模型输入、OpenAPI、Mock 行为、README、冒烟和视频脚本已同步。
+API v1 候选协议现为 `1.0.0-rc3`：新增百炼多阶段意图解析和
+`uncertainty_details`，并保留 rc2 `uncertainty` 字符串用于安全兼容。Pydantic、模型输入、
+OpenAPI、Android Mapper、Mock 行为、README、冒烟和视频脚本已同步。
 
 Android P0 已实现固定意图、BT.709 指标、单步 EV 策略、3/5 帧时序、低频语义缓存、
 SafetyGuard、FakeCameraAdapter、写后读回模型和演示界面。Fake 能力标记为 Mock 并由
@@ -51,8 +66,10 @@ Android Lint 未计入通过项：`lintDebug` 所需的 `intellij-core-32.4.0.ja
 ## 仍需真实环境验收
 
 - 自有真实照片连续调用 3 次：单次真实照片已成功并检查语义，仍需连续 3 次确认字段稳定性。
-- B/C 对接确认：rc2 类型已经在 Android 和后端实现，仍需团队在实际工作分支完成调用接线。
-- Android 到后端到百炼的完整链路：已有 rc2 客户端，尚未接入真实相机预览帧并做真机端到端调用。
+- B/C 对接确认：rc3 类型、字段级降级和融合仲裁已在 Android/后端实现，仍需团队在实际
+  工作分支用真实服务完成联调。
+- Android 到后端到百炼的完整链路：已有 rc3 客户端和模拟器入口，尚未接入真实相机预览
+  帧并做真机端到端调用。
 - 真实相机帧质量、SDK 操作和实际 EV 回读：属于 A/C 真机链路，后端测试无法替代。
 
 这些未验证项不应写成 PASS。按 README 中的图片与 HTTP 冒烟命令完成真实照片和 Android 联调后，将耗时、状态及稳定性观察补充到此记录；不要记录密钥或原始私密图片。

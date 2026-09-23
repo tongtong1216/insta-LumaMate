@@ -1,9 +1,14 @@
 # Insta-auto_adjust
 
-Android 端的 LightPilot P0 原型。现已包含结构化拍摄意图、BT.709 画面指标、低频场景
-语义缓存、单步 EV 策略、3/5 帧时序确认、SafetyGuard、Fake 相机适配器和建议确认界面。
+Android 端的 LightPilot 原型。现已包含百炼多阶段意图解析、三个独立权重、BT.709
+画面指标、字段级语义降级、低频场景缓存、单动作融合仲裁、3/5 帧时序确认、
+SafetyGuard、Fake 相机适配器和建议确认界面。
 Fake 相机默认标记为 Mock，不能绕过安全检查写入设备；真实相机控制仍由 A 通过
 `CameraAdapter` 接入 Insta360 SDK。
+
+三阶段意图规划的当前实现范围见
+[docs/THREE_STAGE_PLANNING.md](docs/THREE_STAGE_PLANNING.md)：阶段一具备真实执行契约，阶段二
+（快门/ISO）和阶段三（白平衡）已完成 Mock 策略、时序与安全拦截，等待 A 的真机能力快照。
 
 ## 首次运行
 
@@ -17,9 +22,11 @@ Fake 相机默认标记为 Mock，不能绕过安全检查写入设备；真实�
 
 ## 后端
 
-FastAPI 后端位于 [lightpilot-backend/](lightpilot-backend/README.md)，提供 `/health` 与 `/api/v1/analyze-scene`。默认 Mock 模式可直接联调；配置百炼密钥、地址并切换模式后可分析真实图片。安装、启动、Android 连接方法和接口协议均见后端 README。
+FastAPI 后端位于 [lightpilot-backend/](lightpilot-backend/README.md)，提供 `/health`、
+`/api/v1/parse-intent` 与 `/api/v1/analyze-scene`。默认 Mock 模式可联调；配置百炼后可
+解析真实用户意图并分析图片。
 
-Android 与后端使用 `1.0.0-rc2` 候选协议。完整的 P0 组件、真实 SDK 接入点和验收步骤见
+Android 与后端使用 `1.0.0-rc3` 候选协议。完整的 P0 组件、真实 SDK 接入点和验收步骤见
 [docs/P0_IMPLEMENTATION.md](docs/P0_IMPLEMENTATION.md)。
 
 D 与 C 开始联调时使用 [docs/D_C_INTEGRATION_GUIDE.md](docs/D_C_INTEGRATION_GUIDE.md)，

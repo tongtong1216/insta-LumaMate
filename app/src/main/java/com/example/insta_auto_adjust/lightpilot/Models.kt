@@ -84,6 +84,53 @@ enum class BrightRegionType(val wireValue: String) {
     }
 }
 
+enum class UncertaintyCode(val wireValue: String) {
+    SCENE_UNCERTAIN("scene_uncertain"), SUBJECT_TYPE_UNCERTAIN("subject_type_uncertain"),
+    SUBJECT_OCCLUDED("subject_occluded"), BRIGHT_REGION_UNCERTAIN("bright_region_uncertain"),
+    COLORED_LIGHT_UNCERTAIN("colored_light_uncertain"), IMAGE_BLUR("image_blur"),
+    IMAGE_TOO_DARK("image_too_dark"), IMAGE_QUALITY_UNCERTAIN("image_quality_uncertain"),
+    OTHER("other"), MODEL_NOT_CONFIGURED("model_not_configured"),
+    MODEL_NOT_CONNECTED("model_not_connected"), TIMEOUT("timeout"),
+    RATE_LIMITED("rate_limited"), AUTHENTICATION_FAILED("authentication_failed"),
+    CONNECTION_FAILED("connection_failed"), INVALID_MODEL_RESPONSE("invalid_model_response"),
+    MODEL_UNAVAILABLE("model_unavailable"), BACKEND_BUSY("backend_busy"),
+    INTERNAL_ERROR("internal_error");
+
+    companion object {
+        fun fromWire(value: String) = entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+enum class UncertaintySeverity(val wireValue: String) {
+    WARNING("warning"), BLOCKING("blocking");
+
+    companion object {
+        fun fromWire(value: String) = entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+enum class SemanticField(val wireValue: String) {
+    SCENE("scene"), SUBJECT_TYPE("subject_type"), SUBJECT_ROI("subject_roi"),
+    BRIGHT_REGION_TYPE("bright_region_type"), COLORED_LIGHT("colored_light"),
+    IMAGE_QUALITY("image_quality"), ALL("all");
+
+    companion object {
+        fun fromWire(value: String) = entries.firstOrNull { it.wireValue == value }
+    }
+}
+
+data class UncertaintyDetail(
+    val code: UncertaintyCode,
+    val severity: UncertaintySeverity,
+    val affects: Set<SemanticField>,
+    val message: String,
+) {
+    init {
+        require(affects.isNotEmpty())
+        require(message.isNotBlank())
+    }
+}
+
 data class SceneSemantic(
     val frameId: Long,
     val intentRevision: Long,
@@ -94,6 +141,7 @@ data class SceneSemantic(
     val coloredLight: Boolean?,
     val uncertainty: List<String>,
     val reason: String?,
+    val uncertaintyDetails: List<UncertaintyDetail> = emptyList(),
 ) {
     init {
         require(frameId >= 0 && intentRevision >= 0)
@@ -101,7 +149,34 @@ data class SceneSemantic(
 
     val isPolicyUsable: Boolean
         get() = status == SemanticStatus.OK && scene != null && subjectType != null &&
-            brightRegionType != null && coloredLight != null && uncertainty.isEmpty()
+            brightRegionType != null && coloredLight != null && uncertainty.isEmpty() &&
+            uncertaintyDetails.isEmpty()
+
+    /** rc2 warnings have no field scope, so retaining their whole-frame HOLD is the safe fallback. */
+    val hasGlobalBlocker: Boolean
+        get() = status != SemanticStatus.OK ||
+            (uncertaintyDetails.isEmpty() && uncertainty.isNotEmpty()) ||
+            uncertaintyDetails.any {
+                it.severity == UncertaintySeverity.BLOCKING || SemanticField.ALL in it.affects
+            }
+
+    val isCacheable: Boolean
+        get() = status == SemanticStatus.OK && !hasGlobalBlocker
+
+    fun isUsableFor(required: Set<SemanticField>): Boolean {
+        if (hasGlobalBlocker) return false
+        if (uncertaintyDetails.any { detail -> detail.affects.any { it in required } }) return false
+        return required.all {
+            when (it) {
+                SemanticField.SCENE -> scene != null
+                SemanticField.SUBJECT_TYPE -> subjectType != null
+                SemanticField.BRIGHT_REGION_TYPE -> brightRegionType != null
+                SemanticField.COLORED_LIGHT -> coloredLight != null
+                SemanticField.SUBJECT_ROI, SemanticField.IMAGE_QUALITY -> true
+                SemanticField.ALL -> false
+            }
+        }
+    }
 }
 
 enum class RecordingState { IDLE, RECORDING, UNKNOWN }

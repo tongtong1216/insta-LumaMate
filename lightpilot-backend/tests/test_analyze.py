@@ -35,7 +35,8 @@ def test_live_adapter_and_server_owned_ids(live_app, payload, semantic):
 
     client = live_app(upstream)
     data = client.post(PATH, json=payload).json()
-    assert data == dict(semantic, frame_id=42, intent_revision=7, status="ok")
+    assert data == dict(semantic, uncertainty=["主体部分遮挡"],
+                        frame_id=42, intent_revision=7, status="ok")
     assert len(requests) == 1
     sent = json.loads(requests[0].content)
     assert requests[0].url.path == "/v1/chat/completions"
@@ -83,6 +84,19 @@ def test_model_cannot_invent_semantic_enum_values(live_app, payload, semantic):
     invented = dict(semantic, scene="户外草地", subject_type="人物群像")
     client = live_app(lambda request: httpx.Response(200, json=completion(json.dumps(invented))))
 
+    data = client.post(PATH, json=payload).json()
+    assert data["status"] == "unavailable"
+    assert data["uncertainty"] == ["invalid_model_response"]
+
+
+def test_model_cannot_impersonate_service_failure_codes(live_app, payload, semantic):
+    invented = dict(semantic)
+    invented["uncertainty_details"] = [{
+        "code": "timeout", "severity": "blocking", "affects": ["all"],
+        "message": "模型声称服务超时",
+    }]
+    client = live_app(lambda request: httpx.Response(
+        200, json=completion(json.dumps(invented))))
     data = client.post(PATH, json=payload).json()
     assert data["status"] == "unavailable"
     assert data["uncertainty"] == ["invalid_model_response"]

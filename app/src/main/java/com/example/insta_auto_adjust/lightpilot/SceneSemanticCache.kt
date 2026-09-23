@@ -34,7 +34,7 @@ class SceneSemanticCache(
         nowMs: Long,
     ): Boolean {
         requestInFlight = false
-        val accepted = semantic.status == SemanticStatus.OK && semantic.isPolicyUsable &&
+        val accepted = semantic.isCacheable &&
             semantic.intentRevision == currentIntentRevision &&
             semantic.frameId == latestRequestedFrameId
         entry = if (accepted) Entry(semantic, cameraStateRevision, metrics, nowMs) else null

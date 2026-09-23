@@ -31,7 +31,11 @@ def semantic():
     return {
         "scene": "night_low_light", "subject_type": "person",
         "bright_region_type": "lamp", "colored_light": True,
-        "uncertainty": ["主体部分遮挡"], "reason": "霓虹灯形成彩色照明",
+        "uncertainty_details": [{
+            "code": "subject_occluded", "severity": "warning",
+            "affects": ["subject_type", "subject_roi"], "message": "主体部分遮挡",
+        }],
+        "reason": "霓虹灯形成彩色照明",
     }
 
 
