@@ -1,7 +1,15 @@
 package com.example.insta_auto_adjust.camera.insta360
 
 import android.app.Application
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.graphics.Bitmap
+import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.view.PixelCopy
 import android.view.ViewGroup
 import androidx.lifecycle.LifecycleOwner
 import com.arashivision.sdk.camera.api.CameraDevice
@@ -19,6 +27,13 @@ import com.example.insta_auto_adjust.camera.preview.PreviewUiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * SDK-owned renderer for the UI preview contract.
@@ -38,10 +53,12 @@ internal class Insta360CameraPreviewController(
     override val previewState: StateFlow<PreviewUiState> = _previewState.asStateFlow()
 
     private var host: ViewGroup? = null
+    private var hostActivity: Activity? = null
     private var player: InstaCapturePlayerView? = null
     private var activeDevice: CameraDevice? = null
     private var streamStarted = false
     private var generation = 0L
+    private val frameSequence = AtomicLong(0L)
 
     override fun attach(container: ViewGroup) {
         if (host === container && player != null) return
@@ -49,6 +66,7 @@ internal class Insta360CameraPreviewController(
         diagnostics.info("preview.attach", "host=${container.javaClass.simpleName}")
         detach()
         host = container
+        hostActivity = container.context.findActivity()
         player = InstaCapturePlayerView(container.context).also { previewPlayer ->
             container.addView(
                 previewPlayer,
@@ -191,6 +209,7 @@ internal class Insta360CameraPreviewController(
                 "${paramsUpdate.previewWidth}x${paramsUpdate.previewHeight}@${paramsUpdate.previewFps}",
             )
         }
+
     }
 
     private fun playerListener(
@@ -298,8 +317,66 @@ internal class Insta360CameraPreviewController(
         )
     }
 
+    /** Captures the pixels that the SDK has already rendered in the sole preview surface. */
+    suspend fun awaitLatestAnalysisFrame(timeoutMs: Long = ANALYSIS_FRAME_TIMEOUT_MS): RealtimePreviewFrame {
+        val bitmap = withTimeout(timeoutMs) { captureRenderedPreview() }
+        val capturedAt = clock()
+        return try {
+            RealtimePreviewFrame(
+                frameId = frameSequence.incrementAndGet().toString(),
+                jpegBytes = bitmap.toJpeg(),
+                capturedAtEpochMs = capturedAt,
+                width = bitmap.width,
+                height = bitmap.height,
+                source = FrameSource.SDK_RENDERED_PREVIEW,
+            )
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private suspend fun captureRenderedPreview(): Bitmap = withContext(Dispatchers.Main.immediate) {
+        val activity = hostActivity ?: error("Preview host is not attached to an Activity")
+        val previewPlayer = player ?: error("Preview player is not attached")
+        check(streamStarted && _previewState.value.phase == PreviewPhase.RENDERING) {
+            "Preview is not rendering"
+        }
+        check(previewPlayer.width > 0 && previewPlayer.height > 0) { "Preview has no drawable size" }
+        val location = IntArray(2)
+        previewPlayer.getLocationInWindow(location)
+        val rect = Rect(
+            location[0],
+            location[1],
+            location[0] + previewPlayer.width,
+            location[1] + previewPlayer.height,
+        )
+        val bitmap = Bitmap.createBitmap(previewPlayer.width, previewPlayer.height, Bitmap.Config.ARGB_8888)
+        suspendCancellableCoroutine { continuation ->
+            PixelCopy.request(activity.window, rect, bitmap, { result ->
+                if (!continuation.isActive) {
+                    bitmap.recycle()
+                } else if (result == PixelCopy.SUCCESS) {
+                    continuation.resume(bitmap)
+                } else {
+                    bitmap.recycle()
+                    continuation.resumeWithException(
+                        IllegalStateException("PixelCopy failed with code $result"),
+                    )
+                }
+            }, Handler(Looper.getMainLooper()))
+            continuation.invokeOnCancellation { bitmap.recycle() }
+        }
+    }
+
     private companion object {
         const val LOG_TAG = "InstaAutoCamera"
         const val PLAYER_LOADING_TIMEOUT_MS = 10_000L
+        const val ANALYSIS_FRAME_TIMEOUT_MS = 10_000L
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

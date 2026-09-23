@@ -149,9 +149,10 @@ object RealFrameImageReader {
         return VisionMetrics(
             frameId = frameId,
             source = source,
-            roiVersion = "none",
-            // The preview adapter currently has no tracked, reliable subject ROI.
-            subjectBrightness = null,
+            // No tracked subject ROI is available yet.  Expose the measured frame-average value
+            // explicitly instead of letting the presentation layer substitute a fixed 0.5.
+            roiVersion = "frame-average-no-roi",
+            subjectBrightness = average.toFloat(),
             backgroundBrightness = average.toFloat(),
             highlightRatio = highlightRatio.toFloat(),
             darkRatio = darkRatio.toFloat(),

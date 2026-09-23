@@ -262,7 +262,14 @@ class Insta360RealtimePreviewFrameSource(
     }
 }
 
-private class EncodedPreviewDecoder : Closeable {
+/**
+ * Decodes the encoded access units delivered by the Insta360 preview callback.
+ *
+ * The UI renderer and the analysis pipeline deliberately share this decoder helper rather than
+ * opening a second SDK preview stream.  Only the current UI preview owner may register the SDK
+ * stream listener.
+ */
+internal class EncodedPreviewDecoder : Closeable {
     private val codecLock = Any()
     private val pendingImage = AtomicReference<CompletableDeferred<Bitmap>?>(null)
     private val latestImage = AtomicReference<Bitmap?>(null)
@@ -411,7 +418,7 @@ private fun Image.toBitmap(): Bitmap {
     return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
 }
 
-private fun Bitmap.toJpeg(): ByteArray {
+internal fun Bitmap.toJpeg(): ByteArray {
     val output = ByteArrayOutputStream()
     if (!compress(Bitmap.CompressFormat.JPEG, 82, output)) {
         throw IOException("Unable to encode decoded preview frame")

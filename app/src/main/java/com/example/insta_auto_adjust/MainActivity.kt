@@ -21,6 +21,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
+import com.example.insta_auto_adjust.camera.contract.CameraSnapshot
 import com.example.insta_auto_adjust.presentation.AppScreen
 import com.example.insta_auto_adjust.presentation.CameraUiState
 import com.example.insta_auto_adjust.presentation.ConnectionStatus
@@ -38,17 +40,67 @@ import com.example.insta_auto_adjust.ui.screen.ReportScreen
 import com.example.insta_auto_adjust.ui.screen.ShootingScreen
 import com.example.insta_auto_adjust.ui.theme.InstaAutoAdjustTheme
 import com.example.insta_auto_adjust.intent.LocalKeywordIntentResolver
-import com.example.insta_auto_adjust.camera.contract.CameraSnapshot
 import com.example.insta_auto_adjust.camera.insta360.CameraConnectionState
 import com.example.insta_auto_adjust.camera.insta360.ConnectionPhase
 import com.example.insta_auto_adjust.camera.insta360.Insta360ConnectionController
 import com.example.insta_auto_adjust.camera.preview.PreviewUiState
+import com.example.insta_auto_adjust.network.DBackendSceneAnalysisClient
+import com.example.insta_auto_adjust.network.RealFrameImageReader
+import com.example.insta_auto_adjust.network.RealFramePayload
+import com.example.insta_auto_adjust.policy.FrontendPolicyBridge
+import com.lightpilot.core.contract.v1.AnalyzeSceneIntent
+import com.lightpilot.core.contract.v1.AnalyzeSceneMetrics
+import com.lightpilot.core.contract.v1.AnalyzeSceneRequest
+import com.lightpilot.core.contract.v1.ExposurePriority
+import com.lightpilot.core.contract.v1.SceneSemanticCache
+import com.lightpilot.core.contract.v1.StabilityPreference
+import com.lightpilot.core.contract.v1.V1SceneSemanticDataSource
+import com.lightpilot.core.model.CameraCapabilities
+import com.lightpilot.core.model.CameraState
+import com.lightpilot.core.model.ExposureProgram
+import com.lightpilot.core.model.FrameSource
+import com.lightpilot.core.model.InputSource
+import com.lightpilot.core.model.ParameterTarget
+import com.lightpilot.core.model.PolicyAction
+import com.lightpilot.core.model.PolicyProposal
+import com.lightpilot.core.model.RecordingState
+import com.lightpilot.core.model.RiskLevel
+import com.lightpilot.core.model.SafetyDecision
+import com.lightpilot.core.model.SafetyReason
+import com.lightpilot.core.model.SceneSemantic
+import com.lightpilot.core.model.ShutterSpeed
+import com.lightpilot.core.policy.PolicyCoordinator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+
+    private val policyBridge = FrontendPolicyBridge()
+    private val policyCoordinator = PolicyCoordinator()
 
     private val cameraController by lazy {
         Insta360ConnectionController(applicationContext)
     }
+    private val sceneDataSource = V1SceneSemanticDataSource(
+        client = DBackendSceneAnalysisClient(BuildConfig.D_BACKEND_BASE_URL)
+    )
+    private val semanticCache = SceneSemanticCache()
+    private var intentRevision = 0L
+    private var confirmedIntentSignature: String? = null
+    private var latestRequestedModelFrameId: String? = null
+    private var activeCoreProposal: PolicyProposal? = null
+    private var activeSafetyDecision: SafetyDecision? = null
+
+    private data class PendingAnalysis(
+        val state: ShootingUiState,
+        val revision: Long,
+        val snapshot: CameraSnapshot,
+        val intentSignature: String,
+    )
+
+    private fun intentSignature(state: ShootingUiState): String =
+        "${state.selectedIntent.name}|${state.intentInputText.trim()}"
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -205,7 +257,7 @@ class MainActivity : ComponentActivity() {
 
                                 onAnalyzeClick = {
                                     if (cameraState.isRealCameraConnected) {
-                                        handleMockAnalysis()
+                                        handleRealAnalysis()
                                     }
                                 },
 
@@ -266,7 +318,7 @@ class MainActivity : ComponentActivity() {
                                 executionState = executionState,
 
                                 onExecuteClick = {
-                                    handleMockExecution()
+                                    handleRealExecution()
                                 },
 
                                 onReportClick = {
@@ -407,6 +459,255 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private fun handleRealAnalysis() {
+        val initialSnapshot = cameraController.state.value.snapshot
+        if (cameraController.state.value.phase != ConnectionPhase.CONNECTED || initialSnapshot == null) {
+            shootingState = shootingState.copy(
+                isAnalyzing = false,
+                sceneRisk = "真实相机尚未连接或没有可读参数快照。",
+            )
+            return
+        }
+        val signature = intentSignature(shootingState)
+        if (signature != confirmedIntentSignature) {
+            intentRevision++
+            confirmedIntentSignature = signature
+        }
+        val request = PendingAnalysis(shootingState, intentRevision, initialSnapshot, signature)
+        activeCoreProposal = null
+        activeSafetyDecision = null
+        shootingState = shootingState.copy(
+            isAnalyzing = true,
+            dataSource = DataSource.REAL,
+            visionMetrics = null,
+            proposal = null,
+            proposalDecision = null,
+            proposalExecutable = false,
+            proposalBlockReason = null,
+            sceneRisk = "正在从当前真实预览帧分析画面并请求后端语义。",
+        )
+        lifecycleScope.launch {
+            try {
+                analyzeRealPreview(request)
+            } catch (error: Throwable) {
+                shootingState = shootingState.copy(
+                    isAnalyzing = false,
+                    proposalExecutable = false,
+                    sceneRisk = "真实画面分析失败：${error.message ?: error.javaClass.simpleName}",
+                )
+            }
+        }
+    }
+
+    private suspend fun analyzeRealPreview(request: PendingAnalysis) {
+        val firstFrame = withContext(Dispatchers.IO) { cameraController.awaitLatestAnalysisFrame() }
+        val firstPayload = withContext(Dispatchers.Default) {
+            RealFrameImageReader.readJpeg(
+                firstFrame.jpegBytes,
+                firstFrame.frameId,
+                firstFrame.capturedAtEpochMs,
+                firstFrame.source.toCoreFrameSource(),
+            )
+        }
+        latestRequestedModelFrameId = firstFrame.frameId
+        val firstDraft = policyBridge.prepare(
+            request.state,
+            request.revision,
+            firstFrame.frameId,
+            firstFrame.capturedAtEpochMs,
+            realMetrics = firstPayload.metrics,
+            realMetricsUi = firstPayload.metricsUi,
+        )
+        val semantic = readSceneSemanticFromD(
+            request.state,
+            request.revision,
+            firstFrame.frameId,
+            firstFrame.capturedAtEpochMs,
+            firstDraft,
+            firstPayload.imageBase64,
+        )
+        cameraController.recordAnalysisDiagnostic(
+            "dSemantic",
+            "D semantic: status=${semantic.analysisStatus}, available=${semantic.available}, " +
+                "reason=${semantic.reason}, uncertainty=${semantic.uncertaintyNotes}",
+        )
+        if (isStale(request)) return discardStaleAnalysis()
+        val freshSnapshot = withContext(Dispatchers.IO) { cameraController.readSnapshot() }
+        val coreState = freshSnapshot.toCoreCameraState()
+        val coreCapabilities = freshSnapshot.toCoreCapabilities()
+        val token = semanticCache.beginRequest(firstFrame.frameId.toLong(), request.revision)
+        val cacheAccepted = token != null && semanticCache.complete(
+            token,
+            semantic,
+            firstPayload.metrics,
+            intentRevision,
+            freshSnapshot.state.capabilityRevision,
+            freshSnapshot.state.mode,
+            System.currentTimeMillis(),
+        )
+        cameraController.recordAnalysisDiagnostic(
+            "semanticCache",
+            "semantic cache: accepted=$cacheAccepted, tokenCreated=${token != null}, " +
+                "mode=${freshSnapshot.state.mode}, ev=${freshSnapshot.state.currentEv}, " +
+                "supportedEv=${freshSnapshot.capabilities.supportedEv}",
+        )
+
+        var payload = firstPayload
+        var draft = firstDraft
+        var coordinated: com.example.insta_auto_adjust.policy.CoordinatedFrontendResult? = null
+        val requiredFrames = if (
+            request.state.selectedIntent == com.example.insta_auto_adjust.presentation.ShootingIntent.STABLE_EXPOSURE
+        ) 5 else 3
+        repeat(requiredFrames) { index ->
+            if (index > 0) {
+                val frame = withContext(Dispatchers.IO) { cameraController.awaitLatestAnalysisFrame() }
+                payload = withContext(Dispatchers.Default) {
+                    RealFrameImageReader.readJpeg(
+                        frame.jpegBytes,
+                        frame.frameId,
+                        frame.capturedAtEpochMs,
+                        frame.source.toCoreFrameSource(),
+                    )
+                }
+                draft = policyBridge.prepare(
+                    request.state,
+                    request.revision,
+                    payload.metrics.frameId,
+                    payload.metrics.capturedAtEpochMs,
+                    realMetrics = payload.metrics,
+                    realMetricsUi = payload.metricsUi,
+                )
+            }
+            val currentSemantic = if (cacheAccepted) semanticCache.current(
+                intentRevision,
+                freshSnapshot.state.capabilityRevision,
+                freshSnapshot.state.mode,
+                payload.metrics,
+                System.currentTimeMillis(),
+            ) else null
+            coordinated = policyBridge.evaluateCoordinated(
+                request.state,
+                draft,
+                currentSemantic ?: unavailableSceneSemantic(
+                    payload.metrics.frameId,
+                    request.revision,
+                    System.currentTimeMillis(),
+                    IllegalStateException("semantic_cache_unavailable"),
+                ),
+                System.currentTimeMillis(),
+                coreState,
+                coreCapabilities,
+                policyCoordinator,
+            )
+        }
+        if (isStale(request)) return discardStaleAnalysis()
+        val result = requireNotNull(coordinated)
+        val proposal = result.presentation.coreProposal
+        val safety = result.cycle.safetyDecision.takeIf { result.cycle.canRequestConfirmation }
+        activeCoreProposal = proposal
+        activeSafetyDecision = safety
+        cameraController.recordAnalysisDiagnostic(
+            "policy",
+            "policy: action=${proposal.action}, reason=${proposal.reason}, " +
+                "temporal=${result.cycle.temporalDecision.reason}, safety=${safety?.reason}",
+        )
+        shootingState = shootingState.copy(
+            userIntent = result.presentation.userIntentUi,
+            isAnalyzing = false,
+            dataSource = DataSource.REAL,
+            visionMetrics = result.presentation.visionMetricsUi,
+            sceneRisk = result.presentation.sceneRisk,
+            proposal = result.presentation.proposalUi,
+            proposalExecutable = result.cycle.canRequestConfirmation && safety?.allowed == true,
+            proposalBlockReason = when {
+                proposal.action == PolicyAction.HOLD -> proposal.reason
+                !result.cycle.temporalDecision.ready -> "本地时序确认未完成：${result.cycle.temporalDecision.reason}"
+                safety?.allowed != true -> "建议未通过真实相机安全校验。"
+                else -> null
+            },
+            proposalDecision = if (proposal.action == PolicyAction.HOLD || !result.cycle.canRequestConfirmation) {
+                ProposalDecision.HELD
+            } else {
+                ProposalDecision.PENDING
+            },
+        )
+    }
+
+    private fun isStale(request: PendingAnalysis): Boolean =
+        request.revision != intentRevision || request.intentSignature != intentSignature(shootingState)
+
+    private fun discardStaleAnalysis() {
+        shootingState = shootingState.copy(
+            isAnalyzing = false,
+            proposalExecutable = false,
+            proposalDecision = ProposalDecision.HELD,
+            sceneRisk = "已丢弃过期分析结果：拍摄意图已变化。",
+        )
+    }
+
+    private suspend fun readSceneSemanticFromD(
+        state: ShootingUiState,
+        revision: Long,
+        frameId: String,
+        nowEpochMs: Long,
+        draft: com.example.insta_auto_adjust.policy.FrontendPolicyDraft,
+        imageBase64: String,
+    ): SceneSemantic = withContext(Dispatchers.IO) {
+        try {
+            cameraController.withBackendNetwork {
+                sceneDataSource.readSemantic(
+                    AnalyzeSceneRequest(
+                        frameId = frameId.toLong(),
+                        intentRevision = revision,
+                        intent = AnalyzeSceneIntent(
+                            exposurePriority = when (state.selectedIntent) {
+                                com.example.insta_auto_adjust.presentation.ShootingIntent.SUBJECT_PRIORITY -> ExposurePriority.SUBJECT_DETAIL
+                                com.example.insta_auto_adjust.presentation.ShootingIntent.HIGHLIGHT_PRIORITY -> ExposurePriority.HIGHLIGHT_DETAIL
+                                else -> ExposurePriority.BALANCED
+                            },
+                            stabilityPreference = if (
+                                state.selectedIntent == com.example.insta_auto_adjust.presentation.ShootingIntent.STABLE_EXPOSURE
+                            ) StabilityPreference.HIGH else StabilityPreference.NORMAL,
+                            sourceText = draft.userIntent.sourceText ?: state.intentInputText,
+                        ),
+                        imageBase64 = imageBase64,
+                        metrics = AnalyzeSceneMetrics(
+                            draft.metrics.subjectBrightness,
+                            draft.metrics.backgroundBrightness,
+                            draft.metrics.highlightRatio,
+                            draft.metrics.darkRatio,
+                        ),
+                    ),
+                    nowEpochMs,
+                )
+            }
+        } catch (error: Throwable) {
+            unavailableSceneSemantic(frameId, revision, nowEpochMs, error)
+        }
+    }
+
+    private fun unavailableSceneSemantic(
+        frameId: String,
+        revision: Long,
+        nowEpochMs: Long,
+        error: Throwable,
+    ) = SceneSemantic(
+        available = false,
+        scene = null,
+        subjectType = null,
+        brightRegionType = null,
+        coloredLight = null,
+        uncertainty = 1.0f,
+        reason = "d_backend_request_failed:${error.javaClass.simpleName}",
+        sourceFrameId = frameId,
+        receivedAtEpochMs = nowEpochMs,
+        expiresAtEpochMs = null,
+        intentRevision = revision,
+        uncertaintyNotes = listOf("connection_failed"),
+        analysisStatus = "unavailable",
+    )
+
+    /** Legacy B mock remains only as historical reference; no UI event calls it. */
     private fun handleMockAnalysis() {
 
         // 进入分析状态，并清除旧结果
@@ -479,6 +780,29 @@ class MainActivity : ComponentActivity() {
     // =========================================================
 
     private fun handleAcceptProposal() {
+        val proposal = activeCoreProposal ?: return
+        val safety = activeSafetyDecision
+        if (proposal.action == PolicyAction.HOLD || safety?.allowed != true) {
+            shootingState = shootingState.copy(
+                proposalDecision = ProposalDecision.HELD,
+                proposalExecutable = false,
+                proposalBlockReason = "当前建议未通过真实相机安全校验，不能写入参数。",
+            )
+            return
+        }
+        shootingState = shootingState.copy(proposalDecision = ProposalDecision.ACCEPTED)
+        executionState = ExecutionUiState(
+            proposalId = proposal.proposalId,
+            beforeEv = cameraController.state.value.snapshot?.state?.currentEv,
+            targetEv = (proposal.parameter as? ParameterTarget.Ev)?.value,
+            status = ExecutionStatus.IDLE,
+            isMock = false,
+        )
+        currentScreen = AppScreen.EXECUTION
+    }
+
+    /** Legacy B mock remains only as historical reference; no UI event calls it. */
+    private fun handleLegacyMockAcceptProposal() {
 
         val proposal = shootingState.proposal
             ?: return
@@ -544,6 +868,50 @@ class MainActivity : ComponentActivity() {
     // Mock 参数执行
     // =========================================================
 
+    private fun handleRealExecution() {
+        val proposal = activeCoreProposal ?: return
+        val safety = activeSafetyDecision?.takeIf { it.allowed } ?: return
+        executionState = executionState.copy(
+            status = ExecutionStatus.EXECUTING,
+            sdkAck = null,
+            readbackEv = null,
+            errorMessage = null,
+            isMock = false,
+        )
+        lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    cameraController.executeConfirmed(
+                        proposal.toCameraProposal(),
+                        safety.toCameraSafetyDecision(proposal),
+                        userConfirmed = true,
+                    )
+                }
+                executionState = executionState.copy(
+                    beforeEv = result.before?.state?.currentEv ?: executionState.beforeEv,
+                    targetEv = (result.target as? com.example.insta_auto_adjust.camera.contract.EvTarget)?.value
+                        ?: executionState.targetEv,
+                    sdkAck = result.sdkAcknowledged,
+                    readbackEv = result.readback?.state?.currentEv,
+                    status = when (result.status) {
+                        com.example.insta_auto_adjust.camera.contract.ExecutionStatus.SUCCEEDED -> ExecutionStatus.SUCCESS
+                        com.example.insta_auto_adjust.camera.contract.ExecutionStatus.UNKNOWN -> ExecutionStatus.UNKNOWN
+                        else -> ExecutionStatus.FAILED
+                    },
+                    errorMessage = result.reason?.name,
+                    isMock = false,
+                )
+            } catch (error: Throwable) {
+                executionState = executionState.copy(
+                    status = ExecutionStatus.FAILED,
+                    errorMessage = error.message ?: error.javaClass.simpleName,
+                    isMock = false,
+                )
+            }
+        }
+    }
+
+    /** Legacy B mock remains only as historical reference; no UI event calls it. */
     private fun handleMockExecution() {
 
         // ---------------------------------------------------------
@@ -660,7 +1028,6 @@ class MainActivity : ComponentActivity() {
         currentScreen = AppScreen.SHOOTING
     }
 }
-
 private fun CameraConnectionState.toCameraUiState(): CameraUiState {
     val cameraSnapshot: CameraSnapshot? = snapshot
     val connected = phase == ConnectionPhase.CONNECTED
@@ -681,4 +1048,128 @@ private fun CameraConnectionState.toCameraUiState(): CameraUiState {
         dataSource = if (connected) DataSource.REAL else DataSource.UNAVAILABLE,
         errorMessage = if (phase == ConnectionPhase.FAILED) message else null,
     )
+}
+
+private fun CameraSnapshot.toCoreCameraState() = CameraState(
+    connectionEpoch = state.connectionEpoch,
+    mode = state.mode,
+    exposureProgram = state.exposureProgram.toCore(),
+    currentEv = state.currentEv,
+    currentIso = state.currentIso,
+    currentShutterSpeed = state.currentShutterSpeed?.let { ShutterSpeed(it.numerator, it.denominator) },
+    currentWhiteBalance = state.currentWhiteBalance,
+    isWorking = state.isWorking,
+    isPreRecording = state.isPreRecording,
+    isBusy = state.isBusy,
+    recordingState = state.recordingState.toCore(),
+    frameSource = state.frameSource.toCore(),
+    capabilityRevision = state.capabilityRevision,
+)
+
+private fun CameraSnapshot.toCoreCapabilities() = CameraCapabilities(
+    supportedEv = capabilities.supportedEv,
+    supportedShutterSpeed = capabilities.supportedShutterSpeed.map { ShutterSpeed(it.numerator, it.denominator) },
+    supportedIso = capabilities.supportedIso,
+    supportedWhiteBalance = capabilities.supportedWhiteBalance,
+    supportedExposurePrograms = capabilities.supportedExposurePrograms.map { it.toCore() },
+    supportParam = capabilities.supportParam,
+    capabilityRevision = capabilities.capabilityRevision,
+    capturedAtEpochMs = capabilities.capturedAtEpochMs,
+)
+
+private fun com.example.insta_auto_adjust.camera.contract.ExposureProgram.toCore() = when (this) {
+    com.example.insta_auto_adjust.camera.contract.ExposureProgram.AUTO -> ExposureProgram.AUTO
+    com.example.insta_auto_adjust.camera.contract.ExposureProgram.MANUAL -> ExposureProgram.MANUAL
+    com.example.insta_auto_adjust.camera.contract.ExposureProgram.UNKNOWN -> ExposureProgram.UNKNOWN
+}
+
+private fun com.example.insta_auto_adjust.camera.contract.RecordingState.toCore() = when (this) {
+    com.example.insta_auto_adjust.camera.contract.RecordingState.IDLE -> RecordingState.IDLE
+    com.example.insta_auto_adjust.camera.contract.RecordingState.RECORDING -> RecordingState.RECORDING
+    com.example.insta_auto_adjust.camera.contract.RecordingState.STARTING -> RecordingState.STARTING
+    com.example.insta_auto_adjust.camera.contract.RecordingState.STOPPING -> RecordingState.STOPPING
+    com.example.insta_auto_adjust.camera.contract.RecordingState.UNKNOWN -> RecordingState.UNKNOWN
+}
+
+private fun com.example.insta_auto_adjust.camera.contract.FrameSource.toCore() = when (this) {
+    com.example.insta_auto_adjust.camera.contract.FrameSource.SDK_DECODED -> FrameSource.SDK_DECODED
+    com.example.insta_auto_adjust.camera.contract.FrameSource.SDK_RENDERED_PREVIEW -> FrameSource.SDK_RENDERED_PREVIEW
+    com.example.insta_auto_adjust.camera.contract.FrameSource.MANUAL_IMPORT -> FrameSource.MANUAL_IMPORT
+    com.example.insta_auto_adjust.camera.contract.FrameSource.MOCK -> FrameSource.MOCK
+    com.example.insta_auto_adjust.camera.contract.FrameSource.UNKNOWN -> FrameSource.UNKNOWN
+}
+
+private fun com.example.insta_auto_adjust.camera.contract.FrameSource.toCoreFrameSource(): FrameSource =
+    toCore()
+
+private fun PolicyProposal.toCameraProposal() = com.example.insta_auto_adjust.camera.contract.PolicyProposal(
+    proposalId = proposalId,
+    intentRevision = intentRevision,
+    frameId = frameId,
+    action = action.toCameraAction(),
+    parameter = parameter.toCameraTarget(),
+    reason = reason,
+    risk = risk.toCameraRisk(),
+    cost = cost,
+    validUntilEpochMs = validUntilEpochMs,
+    connectionEpoch = connectionEpoch,
+    capabilityRevision = capabilityRevision,
+    inputSource = inputSource.toCameraSource(),
+)
+
+private fun PolicyAction.toCameraAction() = when (this) {
+    PolicyAction.HOLD -> com.example.insta_auto_adjust.camera.contract.PolicyAction.HOLD
+    PolicyAction.EV_ONE_STEP_UP -> com.example.insta_auto_adjust.camera.contract.PolicyAction.EV_ONE_STEP_UP
+    PolicyAction.EV_ONE_STEP_DOWN -> com.example.insta_auto_adjust.camera.contract.PolicyAction.EV_ONE_STEP_DOWN
+    PolicyAction.SET_SHUTTER -> com.example.insta_auto_adjust.camera.contract.PolicyAction.SET_SHUTTER
+    PolicyAction.SET_ISO -> com.example.insta_auto_adjust.camera.contract.PolicyAction.SET_ISO
+    PolicyAction.SET_WHITE_BALANCE -> com.example.insta_auto_adjust.camera.contract.PolicyAction.SET_WHITE_BALANCE
+}
+
+private fun ParameterTarget?.toCameraTarget() = when (this) {
+    null -> null
+    is ParameterTarget.Ev -> com.example.insta_auto_adjust.camera.contract.EvTarget(value)
+    is ParameterTarget.Iso -> com.example.insta_auto_adjust.camera.contract.IsoTarget(value)
+    is ParameterTarget.Shutter -> com.example.insta_auto_adjust.camera.contract.ShutterSpeedTarget(
+        com.example.insta_auto_adjust.camera.contract.ShutterSpeed(value.numerator, value.denominator),
+    )
+    is ParameterTarget.WhiteBalance -> com.example.insta_auto_adjust.camera.contract.WhiteBalanceTarget(value)
+}
+
+private fun RiskLevel.toCameraRisk() = when (this) {
+    RiskLevel.LOW -> com.example.insta_auto_adjust.camera.contract.RiskLevel.LOW
+    RiskLevel.MEDIUM -> com.example.insta_auto_adjust.camera.contract.RiskLevel.MEDIUM
+    RiskLevel.HIGH -> com.example.insta_auto_adjust.camera.contract.RiskLevel.HIGH
+    RiskLevel.UNKNOWN -> com.example.insta_auto_adjust.camera.contract.RiskLevel.UNKNOWN
+}
+
+private fun InputSource.toCameraSource() = when (this) {
+    InputSource.REAL -> com.example.insta_auto_adjust.camera.contract.InputSource.REAL_CAMERA
+    InputSource.MOCK -> com.example.insta_auto_adjust.camera.contract.InputSource.MOCK
+}
+
+private fun SafetyDecision.toCameraSafetyDecision(proposal: PolicyProposal) =
+    com.example.insta_auto_adjust.camera.contract.SafetyDecision(
+        allowed = allowed,
+        reasonCode = reason.toCameraReason(),
+        checkedProposalId = checkedProposalId ?: proposal.proposalId,
+        checkedAtEpochMs = checkedAtEpochMs,
+    )
+
+private fun SafetyReason.toCameraReason() = when (this) {
+    SafetyReason.ALLOWED -> com.example.insta_auto_adjust.camera.contract.SafetyReason.ALLOWED
+    SafetyReason.STALE_FRAME -> com.example.insta_auto_adjust.camera.contract.SafetyReason.STALE_FRAME
+    SafetyReason.STALE_INTENT -> com.example.insta_auto_adjust.camera.contract.SafetyReason.STALE_INTENT
+    SafetyReason.STALE_CAPABILITY -> com.example.insta_auto_adjust.camera.contract.SafetyReason.STALE_CAPABILITY
+    SafetyReason.CAMERA_BUSY -> com.example.insta_auto_adjust.camera.contract.SafetyReason.CAMERA_BUSY
+    SafetyReason.RECORDING -> com.example.insta_auto_adjust.camera.contract.SafetyReason.RECORDING
+    SafetyReason.UNKNOWN_CAMERA_STATE -> com.example.insta_auto_adjust.camera.contract.SafetyReason.UNKNOWN_CAMERA_STATE
+    SafetyReason.ILLEGAL_TARGET -> com.example.insta_auto_adjust.camera.contract.SafetyReason.ILLEGAL_TARGET
+    SafetyReason.DUPLICATE_COMMAND -> com.example.insta_auto_adjust.camera.contract.SafetyReason.DUPLICATE_COMMAND
+    SafetyReason.MODEL_UNAVAILABLE -> com.example.insta_auto_adjust.camera.contract.SafetyReason.MODEL_UNAVAILABLE
+    SafetyReason.USER_LOCKED -> com.example.insta_auto_adjust.camera.contract.SafetyReason.USER_LOCKED
+    SafetyReason.CONNECTION_CHANGED -> com.example.insta_auto_adjust.camera.contract.SafetyReason.CONNECTION_CHANGED
+    SafetyReason.UNSUPPORTED_PARAMETER -> com.example.insta_auto_adjust.camera.contract.SafetyReason.UNSUPPORTED_PARAMETER
+    SafetyReason.NO_ACTION, SafetyReason.EXPIRED_PROPOSAL, SafetyReason.MISSING_COMMAND_ID ->
+        com.example.insta_auto_adjust.camera.contract.SafetyReason.ILLEGAL_TARGET
 }

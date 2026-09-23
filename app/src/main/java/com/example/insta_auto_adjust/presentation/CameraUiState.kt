@@ -18,7 +18,8 @@ enum class ConnectionStatus {
  */
 enum class DataSource {
     UNAVAILABLE,
-    REAL
+    REAL,
+    MOCK
 }
 
 /**

@@ -46,6 +46,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -89,6 +91,9 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     private var initialized = false
     private var cameraDevice: CameraDevice? = null
     private var wifiNetworkCallback: ConnectivityManager.NetworkCallback? = null
+    /** The GO Ultra Wi-Fi used by the SDK after the application process is bound to it. */
+    private var processBoundCameraNetwork: Network? = null
+    private val networkBindingMutex = Mutex()
     private var scanDevice: CameraDevice? = null
     private var connectionJob: Job? = null
     private var snapshotPollingJob: Job? = null
@@ -255,6 +260,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
                 if (!connectivityManager.bindProcessToNetwork(network)) {
                     error("无法将应用网络绑定到相机 Wi‑Fi")
                 }
+                processBoundCameraNetwork = network
                 diagnostics.info("connection.cameraWifi.processBound")
                 bleCamera.release()
 
@@ -347,6 +353,45 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     }
 
     override fun attach(container: android.view.ViewGroup) = previewController.attach(container)
+
+    /** Returns a fresh frame decoded from the same stream currently rendered in B's preview UI. */
+    suspend fun awaitLatestAnalysisFrame(timeoutMs: Long = 10_000L): RealtimePreviewFrame =
+        previewController.awaitLatestAnalysisFrame(timeoutMs)
+
+    /** Stores integration diagnostics without raw frames, Wi-Fi credentials, or SDK objects. */
+    fun recordAnalysisDiagnostic(event: String, detail: String) {
+        diagnostics.info("analysis.$event", detail)
+    }
+
+    /**
+     * Runs a non-camera network request while the process is normally pinned to the camera Wi-Fi.
+     *
+     * The Insta360 SDK connection itself was established with the camera network handle.  Releasing
+     * the process-wide binding only for this block lets a USB [adb reverse] backend request reach
+     * the development computer, then restores the camera binding before the caller continues.
+     */
+    suspend fun <T> withBackendNetwork(block: suspend () -> T): T = networkBindingMutex.withLock {
+        val cameraNetwork = processBoundCameraNetwork ?: return@withLock block()
+        if (!connectivityManager.bindProcessToNetwork(null)) {
+            diagnostics.warn("connection.backendNetwork.unbindFailed")
+            return@withLock block()
+        }
+        diagnostics.info("connection.backendNetwork.unbound")
+        try {
+            block()
+        } finally {
+            if (processBoundCameraNetwork == cameraNetwork) {
+                val restored = connectivityManager.bindProcessToNetwork(cameraNetwork)
+                if (restored) {
+                    diagnostics.info("connection.backendNetwork.restored")
+                } else {
+                    diagnostics.warn("connection.backendNetwork.restoreFailed")
+                }
+            } else {
+                diagnostics.info("connection.backendNetwork.restoreSkipped", "camera connection changed")
+            }
+        }
+    }
 
     override fun start() = previewController.start()
 
@@ -518,6 +563,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     )
 
     private fun clearNetworkBinding() {
+        processBoundCameraNetwork = null
         runCatching { connectivityManager.bindProcessToNetwork(null) }
         wifiNetworkCallback?.let { callback ->
             runCatching { connectivityManager.unregisterNetworkCallback(callback) }

@@ -191,6 +191,14 @@ fun ShootingScreen(
                     color = PilotGray,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+                shootingState.proposalBlockReason?.let { reason ->
+                    Text(
+                        text = "当前不可执行：$reason",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PilotGray,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
                 Spacer(Modifier.height(18.dp))
                 ProposalActions(
                     decision = shootingState.proposalDecision,

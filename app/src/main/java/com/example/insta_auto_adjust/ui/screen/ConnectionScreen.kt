@@ -192,6 +192,7 @@ private fun dataSourceLabel(
 ): String = when (dataSource) {
     DataSource.UNAVAILABLE -> "等待真实相机数据"
     DataSource.REAL -> "真实相机"
+    DataSource.MOCK -> "模拟数据"
 }
 
 private fun formatEv(value: Double?): String = when {
