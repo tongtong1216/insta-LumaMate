@@ -32,6 +32,9 @@ Android 与后端使用 `1.0.0-rc3` 候选协议。完整的 P0 组件、真实 
 D 与 C 开始联调时使用 [docs/D_C_INTEGRATION_GUIDE.md](docs/D_C_INTEGRATION_GUIDE.md)，
 其中包含真实视频调用结果、请求/响应、缓存、HOLD、安全规则和完成标准。
 
+A/B/C/D 共同验证大模型效果、Android 数据链和真机执行时使用
+[docs/TEAM_MODEL_EFFECT_INTEGRATION_TEST_GUIDE.md](docs/TEAM_MODEL_EFFECT_INTEGRATION_TEST_GUIDE.md)。
+
 ## 约定
 
 - Android 第三方依赖的版本统一维护在 `gradle/libs.versions.toml`；后端依赖锁定在 `lightpilot-backend/requirements*.txt`。
