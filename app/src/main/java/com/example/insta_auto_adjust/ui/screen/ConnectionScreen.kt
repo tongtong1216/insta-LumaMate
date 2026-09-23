@@ -1,13 +1,9 @@
 package com.example.insta_auto_adjust.ui.screen
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,10 +13,10 @@ import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.CameraUiState
 import com.example.insta_auto_adjust.presentation.ConnectionStatus
 import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
 import com.example.insta_auto_adjust.ui.components.PrimaryAction
-import com.example.insta_auto_adjust.ui.components.WhiteSheet
 import com.example.insta_auto_adjust.ui.theme.PilotWhite
 
 @Composable
@@ -29,11 +25,10 @@ fun ConnectionScreen(
     onConnectClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)) {
+    BottomAnchoredPage(
+        modifier = modifier,
+        topContent = {
+            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)) {
             BrandHeader(subtitle = "AI 相机拍摄助手")
             Spacer(Modifier.height(58.dp))
             Text(
@@ -65,9 +60,9 @@ fun ConnectionScreen(
                 color = PilotWhite,
                 fontWeight = FontWeight.Bold
             )
-        }
-
-        WhiteSheet {
+            }
+        },
+        sheetContent = {
             DataStrip {
                 DataValue("拍摄模式", cameraState.mode ?: "--")
                 DataValue("当前 EV", formatEv(cameraState.currentEv))
@@ -93,7 +88,7 @@ fun ConnectionScreen(
                 onClick = onConnectClick
             )
         }
-    }
+    )
 }
 
 private fun connectionTitle(status: ConnectionStatus): String = when (status) {

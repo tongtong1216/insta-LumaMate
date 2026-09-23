@@ -3,12 +3,9 @@ package com.example.insta_auto_adjust.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,11 +16,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ReportUiState
 import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
 import com.example.insta_auto_adjust.ui.components.PrimaryAction
 import com.example.insta_auto_adjust.ui.components.SectionEyebrow
-import com.example.insta_auto_adjust.ui.components.WhiteSheet
 import com.example.insta_auto_adjust.ui.theme.PilotGray
 import com.example.insta_auto_adjust.ui.theme.PilotGreen
 import com.example.insta_auto_adjust.ui.theme.PilotInk
@@ -35,15 +32,16 @@ fun ReportScreen(
     onFinishClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        BrandHeader(
-            subtitle = "拍摄报告",
-            showMock = false,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
-        )
-        Spacer(Modifier.height(26.dp))
-
-        WhiteSheet {
+    BottomAnchoredPage(
+        modifier = modifier,
+        topContent = {
+            BrandHeader(
+                subtitle = "拍摄报告",
+                showMock = false,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
+            )
+        },
+        sheetContent = {
             Column(
                 modifier = Modifier.padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -104,7 +102,7 @@ fun ReportScreen(
             Spacer(Modifier.height(24.dp))
             PrimaryAction("完成并返回", onFinishClick)
         }
-    }
+    )
 }
 
 @Composable

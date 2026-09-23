@@ -8,14 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,11 +30,11 @@ import com.example.insta_auto_adjust.presentation.ProposalDecision
 import com.example.insta_auto_adjust.presentation.ShootingIntent
 import com.example.insta_auto_adjust.presentation.ShootingUiState
 import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
 import com.example.insta_auto_adjust.ui.components.PrimaryAction
 import com.example.insta_auto_adjust.ui.components.SectionEyebrow
-import com.example.insta_auto_adjust.ui.components.WhiteSheet
 import com.example.insta_auto_adjust.ui.theme.PilotGray
 import com.example.insta_auto_adjust.ui.theme.PilotGraySoft
 import com.example.insta_auto_adjust.ui.theme.PilotInk
@@ -55,13 +52,15 @@ fun ShootingScreen(
     onHoldProposal: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        BrandHeader(
-            subtitle = "拍摄助手",
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
-        )
-
-        WhiteSheet {
+    BottomAnchoredPage(
+        modifier = modifier,
+        topContent = {
+            BrandHeader(
+                subtitle = "拍摄助手",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
+            )
+        },
+        sheetContent = {
             PreviewPanel()
             Spacer(Modifier.height(18.dp))
 
@@ -172,7 +171,7 @@ fun ShootingScreen(
             }
             Spacer(Modifier.height(10.dp))
         }
-    }
+    )
 }
 
 @Composable

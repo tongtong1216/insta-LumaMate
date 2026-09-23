@@ -1,14 +1,19 @@
 package com.example.insta_auto_adjust.ui.components
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +28,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.example.insta_auto_adjust.ui.theme.PilotBlack
 import com.example.insta_auto_adjust.ui.theme.PilotGray
 import com.example.insta_auto_adjust.ui.theme.PilotInk
@@ -91,8 +97,30 @@ fun WhiteSheet(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
         shape = PilotSheetShape
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 24.dp),
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(start = 22.dp, top = 24.dp, end = 22.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp),
             content = { content() }
+        )
+    }
+}
+
+@Composable
+fun BottomAnchoredPage(
+    modifier: Modifier = Modifier,
+    sheetTopClearance: Dp = 156.dp,
+    topContent: @Composable () -> Unit,
+    sheetContent: @Composable () -> Unit
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        topContent()
+        WhiteSheet(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .heightIn(max = (maxHeight - sheetTopClearance).coerceAtLeast(320.dp)),
+            content = sheetContent
         )
     }
 }

@@ -6,13 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,11 +21,11 @@ import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ExecutionStatus
 import com.example.insta_auto_adjust.presentation.ExecutionUiState
 import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
 import com.example.insta_auto_adjust.ui.components.PrimaryAction
 import com.example.insta_auto_adjust.ui.components.SectionEyebrow
-import com.example.insta_auto_adjust.ui.components.WhiteSheet
 import com.example.insta_auto_adjust.ui.theme.PilotGray
 import com.example.insta_auto_adjust.ui.theme.PilotGreen
 import com.example.insta_auto_adjust.ui.theme.PilotWhite
@@ -41,8 +38,10 @@ fun ExecutionScreen(
     onReportClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)) {
+    BottomAnchoredPage(
+        modifier = modifier,
+        topContent = {
+            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)) {
             BrandHeader(subtitle = "执行反馈")
             Spacer(Modifier.height(42.dp))
             ExecutionSteps(executionState)
@@ -84,9 +83,9 @@ fun ExecutionScreen(
                 color = PilotWhite.copy(alpha = 0.45f)
             )
             Spacer(Modifier.height(34.dp))
-        }
-
-        WhiteSheet {
+            }
+        },
+        sheetContent = {
             SectionEyebrow("相机反馈  ·  ACK / READBACK")
             Spacer(Modifier.height(12.dp))
             DataStrip {
@@ -133,7 +132,7 @@ fun ExecutionScreen(
                 ExecutionStatus.UNKNOWN -> PrimaryAction("等待状态确认", {}, enabled = false)
             }
         }
-    }
+    )
 }
 
 @Composable
