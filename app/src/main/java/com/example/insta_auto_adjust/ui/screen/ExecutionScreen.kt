@@ -20,7 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ExecutionStatus
 import com.example.insta_auto_adjust.presentation.ExecutionUiState
-import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.NavigableBrandHeader
 import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
@@ -36,13 +36,24 @@ fun ExecutionScreen(
     executionState: ExecutionUiState,
     onExecuteClick: () -> Unit,
     onReportClick: () -> Unit,
+    onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BottomAnchoredPage(
         modifier = modifier,
         topContent = {
-            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)) {
-            BrandHeader(subtitle = "执行反馈")
+
+            Column(
+                modifier = Modifier.padding(
+                    horizontal = 24.dp,
+                    vertical = 20.dp
+                )
+            ) {
+
+                NavigableBrandHeader(
+                    subtitle = "执行反馈",
+                    onBackClick = onBackClick
+                )
             Spacer(Modifier.height(42.dp))
             ExecutionSteps(executionState)
             Spacer(Modifier.height(44.dp))

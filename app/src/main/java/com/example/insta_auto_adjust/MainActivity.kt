@@ -32,6 +32,7 @@ import com.example.insta_auto_adjust.ui.screen.ReportScreen
 import com.example.insta_auto_adjust.ui.screen.ShootingScreen
 import com.example.insta_auto_adjust.ui.theme.InstaAutoAdjustTheme
 import com.example.insta_auto_adjust.intent.LocalKeywordIntentResolver
+
 class MainActivity : ComponentActivity() {
 
     // =========================================================
@@ -132,6 +133,7 @@ class MainActivity : ComponentActivity() {
                                         proposalDecision = null
                                     )
                                 },
+
                                 onIntentTextChange = { text ->
 
                                     shootingState = shootingState.copy(
@@ -148,7 +150,6 @@ class MainActivity : ComponentActivity() {
                                     )
                                 },
 
-
                                 onAnalyzeClick = {
                                     handleMockAnalysis()
                                 },
@@ -159,6 +160,9 @@ class MainActivity : ComponentActivity() {
 
                                 onHoldProposal = {
                                     handleHoldProposal()
+                                },
+                                onBackClick = {
+                                    currentScreen = AppScreen.CONNECTION
                                 },
 
                                 modifier = Modifier
@@ -183,6 +187,9 @@ class MainActivity : ComponentActivity() {
                                 onReportClick = {
                                     handleOpenReport()
                                 },
+                                onBackClick = {
+                                    currentScreen = AppScreen.SHOOTING
+                                },
 
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -201,6 +208,9 @@ class MainActivity : ComponentActivity() {
 
                                 onFinishClick = {
                                     handleFinishReport()
+                                },
+                                onBackClick = {
+                                    currentScreen = AppScreen.EXECUTION
                                 },
 
                                 modifier = Modifier
@@ -302,11 +312,13 @@ class MainActivity : ComponentActivity() {
         // ---------------------------------------------------------
         // 把分析结果交给 UI
         // ---------------------------------------------------------
+
         val resolvedIntent =
             LocalKeywordIntentResolver.resolve(
                 rawText = shootingState.intentInputText,
                 selectedIntent = shootingState.selectedIntent
             )
+
         shootingState = shootingState.copy(
             isAnalyzing = false,
 
@@ -474,7 +486,7 @@ class MainActivity : ComponentActivity() {
         // ---------------------------------------------------------
 
         reportState = ReportUiState(
-            proposalId = executionState.proposalId?:return,
+            proposalId = executionState.proposalId ?: return,
             beforeEv = executionState.beforeEv,
             targetEv = executionState.targetEv,
             sdkAck = executionState.sdkAck,

@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ProposalDecision
 import com.example.insta_auto_adjust.presentation.ShootingIntent
 import com.example.insta_auto_adjust.presentation.ShootingUiState
-import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.NavigableBrandHeader
 import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
@@ -50,14 +50,20 @@ fun ShootingScreen(
     onAnalyzeClick: () -> Unit,
     onAcceptProposal: () -> Unit,
     onHoldProposal: () -> Unit,
+    onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BottomAnchoredPage(
         modifier = modifier,
         topContent = {
-            BrandHeader(
+
+            NavigableBrandHeader(
                 subtitle = "拍摄助手",
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
+                onBackClick = onBackClick,
+                modifier = Modifier.padding(
+                    horizontal = 24.dp,
+                    vertical = 20.dp
+                )
             )
         },
         sheetContent = {

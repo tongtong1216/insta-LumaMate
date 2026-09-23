@@ -15,7 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.insta_auto_adjust.presentation.ReportUiState
-import com.example.insta_auto_adjust.ui.components.BrandHeader
+import com.example.insta_auto_adjust.ui.components.NavigableBrandHeader
 import com.example.insta_auto_adjust.ui.components.BottomAnchoredPage
 import com.example.insta_auto_adjust.ui.components.DataStrip
 import com.example.insta_auto_adjust.ui.components.DataValue
@@ -30,15 +30,20 @@ import com.example.insta_auto_adjust.ui.theme.PilotWhite
 fun ReportScreen(
     reportState: ReportUiState,
     onFinishClick: () -> Unit,
+    onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BottomAnchoredPage(
         modifier = modifier,
         topContent = {
-            BrandHeader(
+
+            NavigableBrandHeader(
                 subtitle = "拍摄报告",
-                showMock = false,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
+                onBackClick = onBackClick,
+                modifier = Modifier.padding(
+                    horizontal = 24.dp,
+                    vertical = 20.dp
+                )
             )
         },
         sheetContent = {
