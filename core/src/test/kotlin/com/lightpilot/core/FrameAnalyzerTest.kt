@@ -24,7 +24,7 @@ class FrameAnalyzerTest {
         )
 
         assertEquals(0.9125f, metrics.subjectBrightness!!, 0.0001f)
-        assertEquals(0.1875f, metrics.highlightRatio!!, 0.0001f)
+        assertEquals(0.0f, metrics.highlightRatio!!, 0.0001f)
         assertEquals(0.1875f, metrics.darkRatio!!, 0.0001f)
         assertEquals(null, metrics.motionScore)
     }
@@ -38,5 +38,7 @@ class FrameAnalyzerTest {
         assertNotNull(metrics.motionScore)
         assertEquals(0.6f, metrics.motionScore!!, 0.0001f)
         assertTrue(metrics.motionScore!! > 0f)
+        assertEquals(null, metrics.subjectBrightness)
+        assertEquals("none", metrics.roiVersion)
     }
 }

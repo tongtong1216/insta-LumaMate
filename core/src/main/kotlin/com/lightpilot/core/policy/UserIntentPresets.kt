@@ -50,6 +50,7 @@ object UserIntentPresets {
                 subjectDetail = 0.45f,
                 highlightDetail = 0.45f,
                 exposureStability = 1.0f,
+                highStability = true,
                 sourceText = sourceText,
                 createdAtEpochMs = createdAtEpochMs
             )

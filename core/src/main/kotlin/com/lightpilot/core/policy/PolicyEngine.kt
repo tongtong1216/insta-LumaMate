@@ -21,13 +21,13 @@ import kotlin.math.roundToInt
 
 data class PolicyConfig(
     val maxFrameAgeMs: Long = 1_500L,
-    val maxSemanticAgeMs: Long = 4_000L,
+    val maxSemanticAgeMs: Long = 60_000L,
     val minActionScore: Float = 0.18f,
-    val minScoreMargin: Float = 0.08f,
+    val minScoreMargin: Float = 0.10f,
     val subjectTargetBrightness: Float = 0.48f,
     val highlightWarningRatio: Float = 0.12f,
     val darkWarningRatio: Float = 0.35f,
-    val proposalValidityMs: Long = 2_000L,
+    val proposalValidityMs: Long = 5_000L,
     val semanticConfidenceBonus: Float = 0.10f,
     val advancedIntentMinScore: Float = 0.70f,
     val advancedIntentMargin: Float = 0.10f,
@@ -92,11 +92,8 @@ class PolicyEngine(
         ) {
             return hold(input, proposalId, source, "scene_semantic_intent_mismatch")
         }
-        if (input.semantic.sourceFrameId != null &&
-            input.semantic.sourceFrameId != input.metrics.frameId
-        ) {
-            return hold(input, proposalId, source, "scene_semantic_frame_mismatch")
-        }
+        // sourceFrameId is validated when the D response enters the cache.
+        // Cached semantics are intentionally reused by later local frames.
         if (input.semantic.expiresAtEpochMs != null &&
             input.nowEpochMs > input.semantic.expiresAtEpochMs
         ) {
@@ -109,6 +106,35 @@ class PolicyEngine(
         }
         if (input.userLocked) {
             return hold(input, proposalId, source, "user_locked_parameters")
+        }
+
+        val subjectStageBlocked = input.metrics.subjectBrightness == null ||
+            input.semantic.hasUncertaintyAffecting(
+                "subject", "subject_type", "subject_roi", "roi"
+            )
+        val highlightStageBlocked = input.metrics.highlightRatio == null ||
+            input.semantic.hasUncertaintyAffecting(
+                "highlight", "highlight_clipping_ratio", "bright_region_type"
+            )
+        val highestExposureWeight = max(input.intent.subjectDetail, input.intent.highlightDetail)
+        if (highestExposureWeight >= 0.50f &&
+            input.intent.subjectDetail >= input.intent.highlightDetail &&
+            subjectStageBlocked
+        ) {
+            return hold(input, proposalId, source, "subject_roi_or_semantic_unavailable")
+        }
+        if (highestExposureWeight >= 0.50f &&
+            input.intent.highlightDetail > input.intent.subjectDetail &&
+            highlightStageBlocked
+        ) {
+            return hold(input, proposalId, source, "highlight_metric_or_semantic_unavailable")
+        }
+        if (!subjectStageBlocked &&
+            input.intent.subjectDetail >= 0.50f &&
+            input.metrics.subjectBrightness!! < config.subjectTargetBrightness &&
+            (input.metrics.highlightRatio ?: 0f) >= config.highlightWarningRatio
+        ) {
+            return hold(input, proposalId, source, "subject_dark_highlights_already_clipped")
         }
 
         val subjectRisk = subjectRisk(input.metrics.subjectBrightness)
@@ -149,7 +175,15 @@ class PolicyEngine(
             input.intent.highlightDetail
         )
         val advancedDecision = advancedIntentDecision(input)
-        val exposureScores = exposureScores(input, subjectRisk, highlightRisk, darkRisk, semanticConfidence)
+        val exposureScores = exposureScores(
+            input,
+            subjectRisk,
+            highlightRisk,
+            darkRisk,
+            semanticConfidence,
+            subjectStageBlocked,
+            highlightStageBlocked
+        )
         val exposureStrong = isDecisive(exposureScores.up, exposureScores.down)
 
         if (advancedDecision.ambiguous &&
@@ -272,19 +306,28 @@ class PolicyEngine(
 
         val target = when (decision.kind) {
             AdvancedIntentKind.MOTION_CLARITY ->
-                nextFasterShutter(input.cameraState.currentShutterSpeed, input.capabilities)
-                    ?.let { PolicyAction.SET_SHUTTER to ParameterTarget.Shutter(it) }
+                if (input.metrics.motionScore == null || input.metrics.darkRatio == null) {
+                    null
+                } else {
+                    nextFasterShutter(input.cameraState.currentShutterSpeed, input.capabilities)
+                        ?.let { PolicyAction.SET_SHUTTER to ParameterTarget.Shutter(it) }
+                }
             AdvancedIntentKind.LOW_NOISE ->
                 nextLowerIso(input.cameraState.currentIso, input.capabilities)
                     ?.let { PolicyAction.SET_ISO to ParameterTarget.Iso(it) }
-            AdvancedIntentKind.COLOR_NEUTRALITY ->
-                chooseWhiteBalanceTarget(
+            AdvancedIntentKind.COLOR_NEUTRALITY -> {
+                val subjectSupportsSkin = input.semantic.subjectType in setOf("person", "group") &&
+                    !input.semantic.hasUncertaintyAffecting("subject", "subject_type")
+                if (!subjectSupportsSkin) null else chooseWhiteBalanceTarget(
                     current = input.cameraState.currentWhiteBalance,
                     capabilities = input.capabilities,
                     desired = 5_000
                 )?.let { PolicyAction.SET_WHITE_BALANCE to ParameterTarget.WhiteBalance(it) }
+            }
             AdvancedIntentKind.ATMOSPHERE_PRESERVATION -> {
-                if (input.semantic.coloredLight != true) {
+                if (input.semantic.coloredLight != true ||
+                    input.semantic.hasUncertaintyAffecting("colored_light", "scene", "color")
+                ) {
                     null
                 } else {
                     chooseWhiteBalanceTarget(
@@ -302,7 +345,7 @@ class PolicyEngine(
                 AdvancedIntentKind.ATMOSPHERE_PRESERVATION ->
                     "atmosphere_semantic_or_white_balance_capability_unavailable"
                 AdvancedIntentKind.MOTION_CLARITY ->
-                    "shutter_capability_unavailable"
+                    "motion_metric_or_shutter_capability_unavailable"
                 AdvancedIntentKind.LOW_NOISE ->
                     "iso_capability_unavailable"
                 AdvancedIntentKind.COLOR_NEUTRALITY ->
@@ -373,17 +416,20 @@ class PolicyEngine(
         subjectRisk: Float,
         highlightRisk: Float,
         darkRisk: Float,
-        semanticConfidence: Float
+        semanticConfidence: Float,
+        subjectStageBlocked: Boolean,
+        highlightStageBlocked: Boolean
     ): ExposureScores {
-        var upScore = input.intent.subjectDetail *
+        var upScore = if (subjectStageBlocked) 0f else input.intent.subjectDetail *
             (subjectRisk * 0.70f + darkRisk * 0.30f)
-        var downScore = input.intent.highlightDetail * highlightRisk
+        var downScore = if (highlightStageBlocked) 0f
+        else input.intent.highlightDetail * highlightRisk
 
-        if (input.semantic.subjectType != null && subjectRisk > 0.2f) {
+        if (!subjectStageBlocked && input.semantic.subjectType != null && subjectRisk > 0.2f) {
             upScore += input.intent.subjectDetail *
                 config.semanticConfidenceBonus * semanticConfidence
         }
-        if (input.semantic.brightRegionType != null && highlightRisk > 0.2f) {
+        if (!highlightStageBlocked && input.semantic.brightRegionType != null && highlightRisk > 0.2f) {
             downScore += input.intent.highlightDetail *
                 config.semanticConfidenceBonus * semanticConfidence
         }

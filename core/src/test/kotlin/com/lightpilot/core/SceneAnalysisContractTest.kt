@@ -1,29 +1,34 @@
 package com.lightpilot.core
 
+import com.lightpilot.core.contract.v1.AnalyzeSceneIntent
 import com.lightpilot.core.contract.v1.AnalyzeSceneRequest
 import com.lightpilot.core.contract.v1.AnalyzeSceneResponse
+import com.lightpilot.core.contract.v1.AnalyzeSceneUncertaintyDetail
+import com.lightpilot.core.contract.v1.ExposurePriority
 import com.lightpilot.core.contract.v1.SceneAnalysisStatus
+import com.lightpilot.core.contract.v1.StabilityPreference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SceneAnalysisContractTest {
     @Test
-    fun requestUsesDWireConstraintsAndMapsMetrics() {
-        val metrics = TestFixtures.metrics(frameId = "152")
+    fun requestUsesRc3IntentAndMetricFields() {
         val request = AnalyzeSceneRequest.fromMetrics(
-            metrics = metrics,
+            metrics = TestFixtures.metrics(frameId = "152"),
             intentRevision = 3L,
-            intentText = "优先拍清楚主体",
+            intent = intent(),
             imageBase64 = "base64-image"
         )
 
         assertEquals(152L, request.frameId)
-        assertEquals(3L, request.intentRevision)
+        assertEquals(ExposurePriority.SUBJECT_DETAIL, request.intent.exposurePriority)
         assertEquals(0.20f, request.metrics?.subjectBrightness)
-        assertEquals(0.05f, request.metrics?.highlightRatio)
+        assertEquals(0.75f, request.metrics?.backgroundBrightness)
+        assertEquals(0.05f, request.metrics?.highlightClippingRatio)
         assertEquals(0.45f, request.metrics?.darkRatio)
     }
 
@@ -33,112 +38,123 @@ class SceneAnalysisContractTest {
             AnalyzeSceneRequest.fromMetrics(
                 metrics = TestFixtures.metrics(frameId = "mock-frame-001"),
                 intentRevision = 1L,
-                intentText = "测试",
+                intent = intent(),
                 imageBase64 = "base64-image"
             )
         }
     }
 
     @Test
-    fun okResponseMapsToUsableSceneSemanticAndPreservesNotes() {
-        val request = request()
-        val semantic = AnalyzeSceneResponse(
-            frameId = 152L,
-            intentRevision = 3L,
-            status = SceneAnalysisStatus.OK,
-            scene = "indoor_backlit",
-            subjectType = "person",
-            brightRegionType = "window",
-            coloredLight = false,
-            uncertainty = listOf("主体边界不完全确定"),
-            reason = "主体较暗，背景更亮"
-        ).toSceneSemantic(request, nowEpochMs = TestFixtures.NOW)
+    fun structuredWarningRemainsUsableAndIsPreservedForFieldDegradation() {
+        val semantic = response(
+            uncertainty = listOf("主体被部分遮挡"),
+            details = listOf(
+                AnalyzeSceneUncertaintyDetail(
+                    code = "subject_occluded",
+                    severity = "warning",
+                    affects = setOf("subject_type", "subject_roi"),
+                    message = "主体边界不完全确定"
+                )
+            )
+        ).toSceneSemantic(request(), TestFixtures.NOW)
 
         assertTrue(semantic.available)
-        assertEquals("152", semantic.sourceFrameId)
-        assertEquals(3L, semantic.intentRevision)
-        assertEquals(1.0f, semantic.uncertainty)
-        assertEquals(listOf("主体边界不完全确定"), semantic.uncertaintyNotes)
-        assertEquals("ok", semantic.analysisStatus)
+        assertNull(semantic.uncertainty)
+        assertTrue(semantic.hasUncertaintyAffecting("subject_roi"))
+        assertFalse(semantic.hasUncertaintyAffecting("bright_region_type"))
+        assertEquals(TestFixtures.NOW + 60_000L, semantic.expiresAtEpochMs)
     }
 
     @Test
-    fun mockAndUnavailableResponsesBecomeHoldableUnavailableSemantics() {
-        val request = request()
+    fun blockingOrAffectsAllCannotEnterSemanticCache() {
+        val blocking = response(
+            details = listOf(
+                AnalyzeSceneUncertaintyDetail(
+                    code = "image_unusable",
+                    severity = "blocking",
+                    affects = setOf("scene"),
+                    message = null
+                )
+            )
+        ).toSceneSemantic(request(), TestFixtures.NOW)
+        val affectsAll = response(
+            details = listOf(
+                AnalyzeSceneUncertaintyDetail(
+                    code = "global_uncertainty",
+                    severity = "warning",
+                    affects = setOf("all"),
+                    message = null
+                )
+            )
+        ).toSceneSemantic(request(), TestFixtures.NOW)
+
+        assertFalse(blocking.available)
+        assertFalse(affectsAll.available)
+    }
+
+    @Test
+    fun rc2UnstructuredUncertaintyStillHoldsWholeFrame() {
+        val semantic = response(uncertainty = listOf("主体不确定"))
+            .toSceneSemantic(request(), TestFixtures.NOW)
+        assertFalse(semantic.available)
+    }
+
+    @Test
+    fun mockUnavailableAndMismatchedResponsesAreNotUsable() {
         val mock = AnalyzeSceneResponse(
-            frameId = 152L,
-            intentRevision = 3L,
-            status = SceneAnalysisStatus.MOCK,
-            scene = null,
-            subjectType = null,
-            brightRegionType = null,
-            coloredLight = null,
-            uncertainty = listOf("mock_result"),
-            reason = "仅用于联调"
-        ).toSceneSemantic(request, TestFixtures.NOW)
+            152L, 3L, SceneAnalysisStatus.MOCK,
+            null, null, null, null, listOf("mock_result"), reason = "联调"
+        ).toSceneSemantic(request(), TestFixtures.NOW)
         val unavailable = AnalyzeSceneResponse(
-            frameId = 152L,
-            intentRevision = 3L,
-            status = SceneAnalysisStatus.UNAVAILABLE,
-            scene = null,
-            subjectType = null,
-            brightRegionType = null,
-            coloredLight = null,
-            uncertainty = listOf("timeout"),
-            reason = "模型超时"
-        ).toSceneSemantic(request, TestFixtures.NOW)
+            152L, 3L, SceneAnalysisStatus.UNAVAILABLE,
+            null, null, null, null, listOf("timeout"), reason = "超时"
+        ).toSceneSemantic(request(), TestFixtures.NOW)
+        val mismatch = response(frameId = 153L).toSceneSemantic(request(), TestFixtures.NOW)
 
         assertFalse(mock.available)
         assertFalse(unavailable.available)
-        assertEquals("timeout", unavailable.uncertaintyNotes.single())
-        assertEquals("mock", mock.analysisStatus)
-        assertEquals("unavailable", unavailable.analysisStatus)
-    }
-
-    @Test
-    fun mismatchedBindingCannotBecomeUsableSemantic() {
-        val request = request()
-        val semantic = AnalyzeSceneResponse(
-            frameId = 153L,
-            intentRevision = 3L,
-            status = SceneAnalysisStatus.OK,
-            scene = "indoor_backlit",
-            subjectType = "person",
-            brightRegionType = "window",
-            coloredLight = false,
-            uncertainty = emptyList(),
-            reason = "旧帧"
-        ).toSceneSemantic(request, TestFixtures.NOW)
-
-        assertFalse(semantic.available)
-        assertEquals("response_binding_mismatch", semantic.reason)
-        assertEquals("153", semantic.sourceFrameId)
+        assertFalse(mismatch.available)
+        assertEquals("response_binding_mismatch", mismatch.reason)
     }
 
     @Test
     fun invalidUnavailableResponseIsRejected() {
         assertFailsWith<IllegalArgumentException> {
             AnalyzeSceneResponse(
-                frameId = 152L,
-                intentRevision = 3L,
-                status = SceneAnalysisStatus.UNAVAILABLE,
-                scene = null,
-                subjectType = null,
-                brightRegionType = null,
-                coloredLight = null,
-                uncertainty = listOf("not_a_stable_code"),
-                reason = null
+                152L, 3L, SceneAnalysisStatus.UNAVAILABLE,
+                null, null, null, null, listOf("not_a_stable_code"), reason = null
             )
         }
     }
 
-    private fun request(): AnalyzeSceneRequest {
-        return AnalyzeSceneRequest(
-            frameId = 152L,
-            intentRevision = 3L,
-            intent = "优先拍清楚主体",
-            imageBase64 = "base64-image",
-            metrics = null
-        )
-    }
+    private fun response(
+        frameId: Long = 152L,
+        uncertainty: List<String> = emptyList(),
+        details: List<AnalyzeSceneUncertaintyDetail> = emptyList()
+    ) = AnalyzeSceneResponse(
+        frameId = frameId,
+        intentRevision = 3L,
+        status = SceneAnalysisStatus.OK,
+        scene = "indoor_backlit",
+        subjectType = "person",
+        brightRegionType = "window",
+        coloredLight = false,
+        uncertainty = uncertainty,
+        uncertaintyDetails = details,
+        reason = "主体较暗，背景更亮"
+    )
+
+    private fun request() = AnalyzeSceneRequest(
+        frameId = 152L,
+        intentRevision = 3L,
+        intent = intent(),
+        imageBase64 = "base64-image",
+        metrics = null
+    )
+
+    private fun intent() = AnalyzeSceneIntent(
+        exposurePriority = ExposurePriority.SUBJECT_DETAIL,
+        stabilityPreference = StabilityPreference.NORMAL,
+        sourceText = "优先拍清楚主体"
+    )
 }

@@ -2,7 +2,10 @@ package com.example.insta_auto_adjust
 
 import com.example.insta_auto_adjust.network.DBackendSceneAnalysisClient
 import com.lightpilot.core.contract.v1.AnalyzeSceneMetrics
+import com.lightpilot.core.contract.v1.AnalyzeSceneIntent
 import com.lightpilot.core.contract.v1.AnalyzeSceneRequest
+import com.lightpilot.core.contract.v1.ExposurePriority
+import com.lightpilot.core.contract.v1.StabilityPreference
 import com.lightpilot.core.contract.v1.V1SceneSemanticDataSource
 import com.lightpilot.core.model.CameraCapabilities
 import com.lightpilot.core.model.CameraState
@@ -42,11 +45,16 @@ class DBackendCoreIntegrationTest {
         val request = AnalyzeSceneRequest(
             frameId = 1L,
             intentRevision = 1L,
-            intent = "优先看清主体，同时保留天空亮部细节",
+            intent = AnalyzeSceneIntent(
+                exposurePriority = ExposurePriority.SUBJECT_DETAIL,
+                stabilityPreference = StabilityPreference.NORMAL,
+                sourceText = "优先看清主体，同时保留天空亮部细节"
+            ),
             imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(image)),
             metrics = AnalyzeSceneMetrics(
                 subjectBrightness = 0.25f,
-                highlightRatio = 0.22f,
+                backgroundBrightness = 0.65f,
+                highlightClippingRatio = 0.22f,
                 darkRatio = 0.35f
             )
         )
@@ -62,7 +70,7 @@ class DBackendCoreIntegrationTest {
                 revision = 1L,
                 subjectDetail = 0.9f,
                 highlightDetail = 0.8f,
-                sourceText = request.intent,
+                sourceText = request.intent.sourceText,
                 createdAtEpochMs = now
             ),
             metrics = VisionMetrics(
@@ -71,7 +79,7 @@ class DBackendCoreIntegrationTest {
                 roiVersion = "live-d-c-test",
                 subjectBrightness = request.metrics?.subjectBrightness,
                 backgroundBrightness = 0.65f,
-                highlightRatio = request.metrics?.highlightRatio,
+                highlightRatio = request.metrics?.highlightClippingRatio,
                 darkRatio = request.metrics?.darkRatio,
                 motionScore = null,
                 capturedAtEpochMs = now,

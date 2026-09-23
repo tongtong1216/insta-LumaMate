@@ -46,7 +46,8 @@ class PolicyScenarioTest {
             )
         )
 
-        assertEquals(PolicyAction.EV_ONE_STEP_UP, subjectFirst.action)
+        assertEquals(PolicyAction.HOLD, subjectFirst.action)
+        assertEquals("subject_dark_highlights_already_clipped", subjectFirst.reason)
         assertEquals(PolicyAction.EV_ONE_STEP_DOWN, highlightFirst.action)
     }
 
@@ -70,12 +71,13 @@ class PolicyScenarioTest {
         assertEquals(PolicyAction.HOLD, proposal.action)
         assertTrue(
             proposal.reason == "exposure_stability_prefers_hold" ||
-                proposal.reason == "tradeoff_is_not_decisive"
+                proposal.reason == "tradeoff_is_not_decisive" ||
+                proposal.reason == "subject_dark_highlights_already_clipped"
         )
     }
 
     @Test
-    fun semanticForAnotherFrameCannotInfluenceCurrentProposal() {
+    fun cachedSemanticCanBeReusedByLaterLocalFrames() {
         val proposal = engine.propose(
             PolicyInput(
                 intent = UserIntentPresets.create(IntentPreset.SUBJECT_FIRST, revision = 1L),
@@ -87,8 +89,7 @@ class PolicyScenarioTest {
             )
         )
 
-        assertEquals(PolicyAction.HOLD, proposal.action)
-        assertEquals("scene_semantic_frame_mismatch", proposal.reason)
+        assertEquals(PolicyAction.EV_ONE_STEP_UP, proposal.action)
     }
 
     @Test

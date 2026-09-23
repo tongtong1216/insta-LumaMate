@@ -1,6 +1,5 @@
 package com.example.insta_auto_adjust.policy
 
-import com.example.insta_auto_adjust.intent.LocalKeywordIntentResolver
 import com.example.insta_auto_adjust.presentation.PolicyProposalUi
 import com.example.insta_auto_adjust.presentation.ShootingIntent
 import com.example.insta_auto_adjust.presentation.ShootingUiState
@@ -22,6 +21,8 @@ import com.lightpilot.core.model.ShutterSpeed
 import com.lightpilot.core.model.UserIntent
 import com.lightpilot.core.model.VisionMetrics
 import com.lightpilot.core.policy.PolicyConfig
+import com.lightpilot.core.policy.PolicyCoordinator
+import com.lightpilot.core.policy.PolicyCycleResult
 import com.lightpilot.core.policy.PolicyEngine
 import com.lightpilot.core.policy.PolicyInput
 
@@ -40,6 +41,11 @@ data class FrontendPolicyDraft(
     val metrics: VisionMetrics
 )
 
+data class CoordinatedFrontendResult(
+    val presentation: FrontendPolicyResult,
+    val cycle: PolicyCycleResult
+)
+
 class FrontendPolicyBridge(
     private val policyEngine: PolicyEngine = PolicyEngine(
         PolicyConfig(maxFrameAgeMs = REAL_ANALYSIS_WINDOW_MS)
@@ -53,10 +59,7 @@ class FrontendPolicyBridge(
         realMetrics: VisionMetrics? = null,
         realMetricsUi: VisionMetricsUi? = null
     ): FrontendPolicyDraft {
-        val userIntentUi = LocalKeywordIntentResolver.resolve(
-            rawText = shootingState.intentInputText,
-            selectedIntent = shootingState.selectedIntent
-        )
+        val userIntentUi = confirmedPresetIntent(shootingState)
         val metricsUi = realMetricsUi
             ?: realMetrics?.toUi()
             ?: mockVisionMetrics(
@@ -141,6 +144,42 @@ class FrontendPolicyBridge(
         )
     }
 
+    fun evaluateCoordinated(
+        shootingState: ShootingUiState,
+        draft: FrontendPolicyDraft,
+        semantic: SceneSemantic,
+        nowEpochMs: Long,
+        cameraState: CameraState,
+        capabilities: CameraCapabilities,
+        coordinator: PolicyCoordinator
+    ): CoordinatedFrontendResult {
+        val cycle = coordinator.evaluate(
+            PolicyInput(
+                intent = draft.userIntent,
+                metrics = draft.metrics,
+                semantic = semantic,
+                cameraState = cameraState,
+                capabilities = capabilities,
+                nowEpochMs = nowEpochMs,
+                userLocked = shootingState.userLocked,
+                inputSource = InputSource.REAL,
+                executionMode = ExecutionMode.REAL
+            )
+        )
+        val proposal = cycle.candidateProposal
+        return CoordinatedFrontendResult(
+            presentation = FrontendPolicyResult(
+                userIntentUi = draft.userIntentUi,
+                visionMetricsUi = draft.visionMetricsUi,
+                sceneRisk = sceneRiskText(semantic, proposal) +
+                    "，时序=${cycle.temporalDecision.reason}",
+                proposalUi = proposal.toUi(),
+                coreProposal = proposal
+            ),
+            cycle = cycle
+        )
+    }
+
     private fun mockVisionMetrics(
         intent: ShootingIntent,
         frameId: String,
@@ -185,6 +224,24 @@ class FrontendPolicyBridge(
         }
     }
 
+    /** C never parses source_text into camera policy. */
+    private fun confirmedPresetIntent(state: ShootingUiState): UserIntentUi {
+        val weights = when (state.selectedIntent) {
+            ShootingIntent.SUBJECT_PRIORITY -> Triple(0.9, 0.4, 0.4)
+            ShootingIntent.BALANCED -> Triple(0.6, 0.6, 0.5)
+            ShootingIntent.HIGHLIGHT_PRIORITY -> Triple(0.4, 0.9, 0.5)
+            ShootingIntent.STABLE_EXPOSURE -> Triple(0.5, 0.6, 0.9)
+        }
+        return UserIntentUi(
+            subjectPriority = weights.first,
+            highlightProtection = weights.second,
+            stabilityPreference = weights.third,
+            allowedAdjustments = setOf("EV"),
+            rawText = state.intentInputText,
+            source = "CONFIRMED_FIXED_ENUM"
+        )
+    }
+
     private fun mockSceneSemantic(
         intent: ShootingIntent,
         revision: Long,
@@ -207,7 +264,7 @@ class FrontendPolicyBridge(
             reason = "front_end_mock_semantic",
             sourceFrameId = metrics.frameId,
             receivedAtEpochMs = nowEpochMs,
-            expiresAtEpochMs = nowEpochMs + 4_000L,
+            expiresAtEpochMs = nowEpochMs + 60_000L,
             intentRevision = revision,
             uncertaintyNotes = emptyList(),
             analysisStatus = "ok"
@@ -258,6 +315,7 @@ class FrontendPolicyBridge(
             subjectDetail = subjectPriority.toFloat().coerceIn(0f, 1f),
             highlightDetail = highlightProtection.toFloat().coerceIn(0f, 1f),
             exposureStability = stabilityPreference.toFloat().coerceIn(0f, 1f),
+            highStability = selectedIntent == ShootingIntent.STABLE_EXPOSURE,
             sourceText = rawText.ifBlank { selectedIntent.displayText() },
             createdAtEpochMs = createdAtEpochMs
         )

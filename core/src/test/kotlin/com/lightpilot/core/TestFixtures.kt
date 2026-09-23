@@ -66,13 +66,15 @@ object TestFixtures {
         revision: Long = 1L,
         subjectDetail: Float = 1f,
         highlightDetail: Float = 0.1f,
-        exposureStability: Float = 0.2f
+        exposureStability: Float = 0.2f,
+        highStability: Boolean = false
     ): UserIntent {
         return UserIntent(
             revision = revision,
             subjectDetail = subjectDetail,
             highlightDetail = highlightDetail,
             exposureStability = exposureStability,
+            highStability = highStability,
             sourceText = "test intent",
             createdAtEpochMs = NOW
         )
@@ -92,7 +94,7 @@ object TestFixtures {
             reason = if (available) "mock semantic" else "timeout",
             sourceFrameId = frameId,
             receivedAtEpochMs = NOW,
-            expiresAtEpochMs = NOW + 4_000L
+            expiresAtEpochMs = NOW + 60_000L
         )
     }
 

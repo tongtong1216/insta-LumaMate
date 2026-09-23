@@ -3,6 +3,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val dBackendBaseUrl = providers.gradleProperty("LIGHTPILOT_BACKEND_URL")
+    .orElse("http://127.0.0.1:8000")
+    .get()
+
 android {
     namespace = "com.example.insta_auto_adjust"
     compileSdk {
@@ -32,6 +36,14 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    defaultConfig {
+        buildConfigField(
+            "String",
+            "D_BACKEND_BASE_URL",
+            "\"${dBackendBaseUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        )
     }
 }
 

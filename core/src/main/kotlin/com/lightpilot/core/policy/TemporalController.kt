@@ -49,8 +49,12 @@ class TemporalController(
         metrics: VisionMetrics,
         candidateAction: PolicyAction,
         nowEpochMs: Long,
-        candidateSignature: String = candidateAction.name
+        candidateSignature: String = candidateAction.name,
+        requiredConfirmationFrames: Int = confirmationFrames,
+        requiredCooldownMs: Long = cooldownMs
     ): TemporalDecision {
+        require(requiredConfirmationFrames > 0)
+        require(requiredCooldownMs >= 0L)
         val filtered = smooth(metrics)
         if (candidateAction == PolicyAction.HOLD) {
             resetPending()
@@ -63,7 +67,7 @@ class TemporalController(
         }
 
         val lastCommit = lastCommittedAtMs
-        if (lastCommit != null && nowEpochMs - lastCommit < cooldownMs) {
+        if (lastCommit != null && nowEpochMs - lastCommit < requiredCooldownMs) {
             resetPending()
             return TemporalDecision(
                 metrics = filtered,
@@ -81,12 +85,12 @@ class TemporalController(
             pendingCount++
         }
 
-        if (pendingCount < confirmationFrames) {
+        if (pendingCount < requiredConfirmationFrames) {
             return TemporalDecision(
                 metrics = filtered,
                 action = PolicyAction.HOLD,
                 ready = false,
-                reason = "awaiting_confirmation_${pendingCount}_of_$confirmationFrames"
+                reason = "awaiting_confirmation_${pendingCount}_of_$requiredConfirmationFrames"
             )
         }
 

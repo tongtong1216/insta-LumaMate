@@ -1,6 +1,7 @@
 package com.lightpilot.core
 
 import com.lightpilot.core.model.PolicyAction
+import com.lightpilot.core.model.SemanticUncertaintyDetail
 import com.lightpilot.core.policy.PolicyEngine
 import com.lightpilot.core.policy.PolicyInput
 import kotlin.test.Test
@@ -9,6 +10,75 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class PolicyEngineTest {
+    @Test
+    fun subjectWarningBlocksOnlyTheDependentStage() {
+        val semantic = TestFixtures.semantic().copy(
+            uncertaintyDetails = listOf(
+                SemanticUncertaintyDetail(
+                    code = "subject_occluded",
+                    severity = "warning",
+                    affects = setOf("subject_type", "subject_roi")
+                )
+            )
+        )
+        val subjectProposal = PolicyEngine().propose(
+            PolicyInput(
+                intent = TestFixtures.intent(subjectDetail = 1f, highlightDetail = 0.1f),
+                metrics = TestFixtures.metrics(),
+                semantic = semantic,
+                cameraState = TestFixtures.cameraState(),
+                capabilities = TestFixtures.capabilities(),
+                nowEpochMs = TestFixtures.NOW
+            )
+        )
+        val highlightProposal = PolicyEngine().propose(
+            PolicyInput(
+                intent = TestFixtures.intent(subjectDetail = 0.1f, highlightDetail = 1f),
+                metrics = TestFixtures.metrics(
+                    subjectBrightness = 0.65f,
+                    highlightRatio = 0.65f,
+                    darkRatio = 0.05f
+                ),
+                semantic = semantic,
+                cameraState = TestFixtures.cameraState(),
+                capabilities = TestFixtures.capabilities(),
+                nowEpochMs = TestFixtures.NOW
+            )
+        )
+
+        assertEquals(PolicyAction.HOLD, subjectProposal.action)
+        assertEquals("subject_roi_or_semantic_unavailable", subjectProposal.reason)
+        assertEquals(PolicyAction.EV_ONE_STEP_DOWN, highlightProposal.action)
+    }
+
+    @Test
+    fun missingReliableRoiBlocksSubjectButNotHighlightPolicy() {
+        val noRoi = TestFixtures.metrics().copy(subjectBrightness = null, roiVersion = "none")
+        val subjectProposal = PolicyEngine().propose(
+            PolicyInput(
+                intent = TestFixtures.intent(subjectDetail = 1f, highlightDetail = 0.1f),
+                metrics = noRoi,
+                semantic = TestFixtures.semantic(),
+                cameraState = TestFixtures.cameraState(),
+                capabilities = TestFixtures.capabilities(),
+                nowEpochMs = TestFixtures.NOW
+            )
+        )
+        val highlightProposal = PolicyEngine().propose(
+            PolicyInput(
+                intent = TestFixtures.intent(subjectDetail = 0.1f, highlightDetail = 1f),
+                metrics = noRoi.copy(highlightRatio = 0.65f, darkRatio = 0.05f),
+                semantic = TestFixtures.semantic(),
+                cameraState = TestFixtures.cameraState(),
+                capabilities = TestFixtures.capabilities(),
+                nowEpochMs = TestFixtures.NOW
+            )
+        )
+
+        assertEquals(PolicyAction.HOLD, subjectProposal.action)
+        assertEquals(PolicyAction.EV_ONE_STEP_DOWN, highlightProposal.action)
+    }
+
     @Test
     fun subjectIntentSuggestsNextLegalEvUp() {
         val input = PolicyInput(
@@ -127,7 +197,7 @@ class PolicyEngineTest {
                 intent = TestFixtures.intent(),
                 metrics = TestFixtures.metrics(),
                 semantic = TestFixtures.semantic().copy(
-                    receivedAtEpochMs = TestFixtures.NOW - 10_000L,
+                    receivedAtEpochMs = TestFixtures.NOW - 61_000L,
                     expiresAtEpochMs = null
                 ),
                 cameraState = TestFixtures.cameraState(),

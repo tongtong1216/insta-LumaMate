@@ -164,7 +164,8 @@ class LocalKeywordIntentResolver : UserIntentResolver {
             lowNoise = if (lowNoiseRequested) 1.0f else base.lowNoise,
             colorNeutrality = if (naturalColorRequested) 1.0f else base.colorNeutrality,
             atmospherePreservation = if (atmosphereRequested) 1.0f else base.atmospherePreservation,
-            exposureStability = if (stableRequested) 1.0f else base.exposureStability
+            exposureStability = if (stableRequested) 1.0f else base.exposureStability,
+            highStability = stableRequested
         )
 
         val signals = buildList {

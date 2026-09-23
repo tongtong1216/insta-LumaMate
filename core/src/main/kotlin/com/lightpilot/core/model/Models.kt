@@ -184,6 +184,7 @@ data class UserIntent(
     val colorNeutrality: Float = 0f,
     val atmospherePreservation: Float = 0f,
     val exposureStability: Float = 0f,
+    val highStability: Boolean = false,
     val sourceText: String? = null,
     val createdAtEpochMs: Long = 0L
 ) {
@@ -214,6 +215,7 @@ data class SceneSemantic(
     val expiresAtEpochMs: Long?,
     val intentRevision: Long? = null,
     val uncertaintyNotes: List<String> = emptyList(),
+    val uncertaintyDetails: List<SemanticUncertaintyDetail> = emptyList(),
     val analysisStatus: String? = null
 ) {
     init {
@@ -226,6 +228,29 @@ data class SceneSemantic(
                 "Unsupported scene analysis status"
             }
         }
+    }
+
+    fun hasUncertaintyAffecting(vararg dependencies: String): Boolean {
+        val normalized = dependencies.map { it.lowercase() }.toSet()
+        return uncertaintyDetails.any { detail ->
+            detail.affects.any { affect ->
+                affect.lowercase() == "all" || affect.lowercase() in normalized
+            }
+        }
+    }
+}
+
+data class SemanticUncertaintyDetail(
+    val code: String,
+    val severity: String,
+    val affects: Set<String>,
+    val message: String? = null
+) {
+    init {
+        require(code.isNotBlank())
+        require(severity in setOf("warning", "blocking"))
+        require(affects.isNotEmpty())
+        require(affects.none { it.isBlank() })
     }
 }
 

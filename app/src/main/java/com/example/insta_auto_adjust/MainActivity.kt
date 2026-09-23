@@ -42,11 +42,14 @@ import com.example.insta_auto_adjust.ui.screen.ReportScreen
 import com.example.insta_auto_adjust.ui.screen.ShootingScreen
 import com.example.insta_auto_adjust.ui.theme.InstaAutoAdjustTheme
 import com.lightpilot.core.contract.v1.AnalyzeSceneMetrics
+import com.lightpilot.core.contract.v1.AnalyzeSceneIntent
 import com.lightpilot.core.contract.v1.AnalyzeSceneRequest
+import com.lightpilot.core.contract.v1.ExposurePriority
+import com.lightpilot.core.contract.v1.StabilityPreference
+import com.lightpilot.core.contract.v1.SceneSemanticCache
 import com.lightpilot.core.contract.v1.V1SceneSemanticDataSource
 import com.lightpilot.core.model.CameraCapabilities
 import com.lightpilot.core.model.CameraState
-import com.lightpilot.core.model.ExecutionMode
 import com.lightpilot.core.model.ExposureProgram
 import com.lightpilot.core.model.FrameSource
 import com.lightpilot.core.model.InputSource
@@ -59,7 +62,7 @@ import com.lightpilot.core.model.SafetyDecision
 import com.lightpilot.core.model.SafetyReason
 import com.lightpilot.core.model.SceneSemantic
 import com.lightpilot.core.model.ShutterSpeed
-import com.lightpilot.core.policy.SafetyGuard
+import com.lightpilot.core.policy.PolicyCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -67,9 +70,7 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val policyBridge = FrontendPolicyBridge()
-    private val safetyGuard = SafetyGuard(
-        maxFrameAgeMs = FrontendPolicyBridge.REAL_ANALYSIS_WINDOW_MS
-    )
+    private val policyCoordinator = PolicyCoordinator()
     private val cameraController by lazy { Insta360ConnectionController(this) }
     private val previewFrameSource by lazy {
         Insta360RealtimePreviewFrameSource(
@@ -79,12 +80,15 @@ class MainActivity : ComponentActivity() {
         )
     }
     private val sceneDataSource = V1SceneSemanticDataSource(
-        client = DBackendSceneAnalysisClient(D_BACKEND_BASE_URL)
+        client = DBackendSceneAnalysisClient(BuildConfig.D_BACKEND_BASE_URL)
     )
+    private val semanticCache = SceneSemanticCache()
 
     private var currentScreen by mutableStateOf(AppScreen.CONNECTION)
     private var intentRevision = 0L
     private var frameSequence = 0L
+    private var confirmedIntentSignature: String? = null
+    private var latestRequestedModelFrameId: String? = null
     private var activeCoreProposal: PolicyProposal? = null
     private var activeSafetyDecision: SafetyDecision? = null
 
@@ -244,6 +248,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntentSelected(intent: ShootingIntent) {
+        semanticCache.invalidate()
+        policyCoordinator.reset()
         shootingState = shootingState.copy(
             selectedIntent = intent,
             userIntent = null,
@@ -261,6 +267,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntentTextChange(text: String) {
+        semanticCache.invalidate()
+        policyCoordinator.reset()
         shootingState = shootingState.copy(
             intentInputText = text,
             userIntent = null,
@@ -288,12 +296,18 @@ class MainActivity : ComponentActivity() {
         }
 
         val now = System.currentTimeMillis()
+        val signature = intentSignature(shootingState)
+        if (signature != confirmedIntentSignature) {
+            intentRevision++
+            confirmedIntentSignature = signature
+        }
         val request = PendingAnalysis(
             state = shootingState,
-            revision = ++intentRevision,
+            revision = intentRevision,
             frameId = (++frameSequence).toString(),
             nowEpochMs = now,
-            snapshot = snapshot
+            snapshot = snapshot,
+            intentSignature = signature
         )
         shootingState = shootingState.copy(
             isAnalyzing = true,
@@ -334,6 +348,7 @@ class MainActivity : ComponentActivity() {
         request: PendingAnalysis,
         frame: RealFramePayload
     ) {
+        latestRequestedModelFrameId = request.frameId
         val draft = policyBridge.prepare(
             shootingState = request.state,
             revision = request.revision,
@@ -342,6 +357,20 @@ class MainActivity : ComponentActivity() {
             realMetrics = frame.metrics,
             realMetricsUi = frame.metricsUi
         )
+        val requestToken = semanticCache.beginRequest(
+            frameId = request.frameId.toLong(),
+            intentRevision = request.revision
+        )
+        if (requestToken == null) {
+            shootingState = shootingState.copy(
+                isAnalyzing = false,
+                sceneRisk = "D 请求仍在进行中；根据 rc3 同时只允许一个请求。",
+                proposal = null,
+                proposalExecutable = false,
+                proposalDecision = ProposalDecision.HELD
+            )
+            return
+        }
         val semantic = withContext(Dispatchers.IO) {
             readSceneSemanticFromD(
                 state = request.state,
@@ -352,54 +381,129 @@ class MainActivity : ComponentActivity() {
                 imageBase64 = frame.imageBase64
             )
         }
-        val freshSnapshot = withContext(Dispatchers.IO) {
-            cameraController.readSnapshot()
+        if (request.revision != intentRevision ||
+            request.frameId != latestRequestedModelFrameId ||
+            request.intentSignature != intentSignature(shootingState)
+        ) {
+            semanticCache.fail(requestToken)
+            shootingState = shootingState.copy(
+                isAnalyzing = false,
+                sceneRisk = "已丢弃过期的 D 响应：意图或代表帧已变化。",
+                proposal = null,
+                proposalExecutable = false,
+                proposalDecision = ProposalDecision.HELD
+            )
+            return
+        }
+        val freshSnapshot = try {
+            withContext(Dispatchers.IO) {
+                cameraController.readSnapshot()
+            }
+        } catch (error: Throwable) {
+            semanticCache.fail(requestToken)
+            throw error
         }
         val coreState = freshSnapshot.toCoreCameraState()
         val coreCapabilities = freshSnapshot.toCoreCapabilities()
-        val analysis = policyBridge.propose(
-            shootingState = request.state,
-            draft = draft,
+        val cameraContextChanged = request.snapshot.state.capabilityRevision !=
+            freshSnapshot.state.capabilityRevision || request.snapshot.state.mode != freshSnapshot.state.mode
+        val cacheAccepted = !cameraContextChanged && semanticCache.complete(
+            token = requestToken,
             semantic = semantic,
-            nowEpochMs = System.currentTimeMillis(),
-            supportedEv = coreCapabilities.supportedEv,
-            cameraState = coreState,
-            capabilities = coreCapabilities,
-            inputSource = InputSource.REAL,
-            executionMode = ExecutionMode.REAL
+            baseline = frame.metrics,
+            currentIntentRevision = intentRevision,
+            cameraStateRevision = freshSnapshot.state.capabilityRevision,
+            mode = freshSnapshot.state.mode,
+            nowEpochMs = System.currentTimeMillis()
         )
-        val proposal = analysis.coreProposal
-        val safety = if (proposal.action == PolicyAction.HOLD) {
-            null
-        } else {
-            safetyGuard.evaluate(
-                proposal = proposal,
-                currentState = coreState,
-                capabilities = coreCapabilities,
-                currentMetrics = frame.metrics,
-                currentIntent = draft.userIntent,
-                nowEpochMs = System.currentTimeMillis(),
-                commandId = "command-${proposal.proposalId}",
-                userLocked = request.state.userLocked
+        if (!cacheAccepted) semanticCache.fail(requestToken)
+        val requiredFrames = if (
+            request.state.selectedIntent == ShootingIntent.STABLE_EXPOSURE
+        ) 5 else 3
+        var latestDraft = draft
+        var latestMetrics = frame.metrics
+        var coordinated: com.example.insta_auto_adjust.policy.CoordinatedFrontendResult? = null
+        var remainingFrames = requiredFrames
+        while (remainingFrames-- > 0) {
+            val previewFrame = withContext(Dispatchers.IO) {
+                previewFrameSource.awaitLatestFrame()
+            }
+            val localFrame = withContext(Dispatchers.Default) {
+                RealFrameImageReader.readJpeg(
+                    jpegBytes = previewFrame.jpegBytes,
+                    frameId = previewFrame.frameId,
+                    nowEpochMs = previewFrame.capturedAtEpochMs,
+                    source = com.lightpilot.core.model.FrameSource.SDK_DECODED
+                )
+            }
+            latestMetrics = localFrame.metrics
+            latestDraft = policyBridge.prepare(
+                shootingState = request.state,
+                revision = request.revision,
+                frameId = localFrame.metrics.frameId,
+                nowEpochMs = localFrame.metrics.capturedAtEpochMs,
+                realMetrics = localFrame.metrics,
+                realMetricsUi = localFrame.metricsUi
             )
+            val cachedSemantic = if (cacheAccepted) {
+                semanticCache.current(
+                    intentRevision = intentRevision,
+                    cameraStateRevision = freshSnapshot.state.capabilityRevision,
+                    mode = freshSnapshot.state.mode,
+                    metrics = localFrame.metrics,
+                    nowEpochMs = System.currentTimeMillis()
+                )
+            } else null
+            val localSemantic = cachedSemantic ?: unavailableSceneSemantic(
+                localFrame.metrics.frameId,
+                request.revision,
+                System.currentTimeMillis(),
+                IllegalStateException("semantic_cache_unavailable")
+            )
+            coordinated = policyBridge.evaluateCoordinated(
+                shootingState = request.state,
+                draft = latestDraft,
+                semantic = localSemantic,
+                nowEpochMs = System.currentTimeMillis(),
+                cameraState = coreState,
+                capabilities = coreCapabilities,
+                coordinator = policyCoordinator
+            )
+            val cycle = coordinated!!.cycle
+            if (cycle.candidateProposal.action == PolicyAction.HOLD ||
+                cycle.temporalDecision.ready ||
+                cycle.temporalDecision.reason == "cooldown"
+            ) break
         }
+        val coordinatedResult = requireNotNull(coordinated)
+        val analysis = coordinatedResult.presentation
+        val proposal = analysis.coreProposal
+        val safety = coordinatedResult.cycle.safetyDecision
+            .takeIf { coordinatedResult.cycle.canRequestConfirmation }
         activeCoreProposal = proposal
         activeSafetyDecision = safety
 
-        val safetyText = safety?.let {
+        val safetyText = if (coordinatedResult.cycle.canRequestConfirmation) safety?.let {
             "；安全检查=${if (it.allowed) "允许真实执行" else "拒绝真实执行"}(${it.reason})"
-        }.orEmpty()
+        }.orEmpty() else "；${coordinatedResult.cycle.temporalDecision.reason}"
         shootingState = shootingState.copy(
             userIntent = analysis.userIntentUi,
             isAnalyzing = false,
             visionMetrics = analysis.visionMetricsUi,
             sceneRisk = analysis.sceneRisk + safetyText,
             proposal = analysis.proposalUi,
-            proposalExecutable = safety?.allowed == true,
-            proposalBlockReason = safety
-                ?.takeUnless { it.allowed }
-                ?.let { "实时预览帧对应的建议未通过安全检查：${it.reason}" },
-            proposalDecision = if (proposal.action == PolicyAction.HOLD) {
+            proposalExecutable = coordinatedResult.cycle.canRequestConfirmation && safety?.allowed == true,
+            proposalBlockReason = when {
+                proposal.action == PolicyAction.HOLD -> proposal.reason
+                !coordinatedResult.cycle.temporalDecision.ready ->
+                    "本地时序确认未完成：${coordinatedResult.cycle.temporalDecision.reason}"
+                safety?.allowed != true -> "实时预览帧对应的建议未通过安全检查。"
+                else -> null
+            },
+            proposalDecision = if (
+                proposal.action == PolicyAction.HOLD ||
+                !coordinatedResult.cycle.canRequestConfirmation
+            ) {
                 ProposalDecision.HELD
             } else {
                 ProposalDecision.PENDING
@@ -420,11 +524,23 @@ class MainActivity : ComponentActivity() {
             val request = AnalyzeSceneRequest(
                 frameId = frameId.toLong(),
                 intentRevision = revision,
-                intent = draft.userIntent.sourceText ?: currentIntentText(state),
+                intent = AnalyzeSceneIntent(
+                    exposurePriority = when (state.selectedIntent) {
+                        ShootingIntent.SUBJECT_PRIORITY -> ExposurePriority.SUBJECT_DETAIL
+                        ShootingIntent.HIGHLIGHT_PRIORITY -> ExposurePriority.HIGHLIGHT_DETAIL
+                        ShootingIntent.BALANCED,
+                        ShootingIntent.STABLE_EXPOSURE -> ExposurePriority.BALANCED
+                    },
+                    stabilityPreference = if (
+                        state.selectedIntent == ShootingIntent.STABLE_EXPOSURE
+                    ) StabilityPreference.HIGH else StabilityPreference.NORMAL,
+                    sourceText = draft.userIntent.sourceText ?: currentIntentText(state)
+                ),
                 imageBase64 = imageBase64,
                 metrics = AnalyzeSceneMetrics(
                     subjectBrightness = draft.metrics.subjectBrightness,
-                    highlightRatio = draft.metrics.highlightRatio,
+                    backgroundBrightness = draft.metrics.backgroundBrightness,
+                    highlightClippingRatio = draft.metrics.highlightRatio,
                     darkRatio = draft.metrics.darkRatio
                 )
             )
@@ -570,6 +686,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun intentSignature(state: ShootingUiState): String {
+        return "${state.selectedIntent.name}|${currentIntentText(state).trim()}"
+    }
+
     override fun onDestroy() {
         previewFrameSource.close()
         cameraController.close()
@@ -581,12 +701,9 @@ class MainActivity : ComponentActivity() {
         val revision: Long,
         val frameId: String,
         val nowEpochMs: Long,
-        val snapshot: CameraSnapshot
+        val snapshot: CameraSnapshot,
+        val intentSignature: String
     )
-
-    private companion object {
-        const val D_BACKEND_BASE_URL = "http://127.0.0.1:8000"
-    }
 
 }
 

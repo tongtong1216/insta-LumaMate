@@ -252,6 +252,11 @@ object PolicyDemo {
             nowEpochMs = nowEpochMs
         )
         return when (scenario) {
+            MockPolicyScenario.HIGHLIGHT_FIRST -> metrics.copy(
+                subjectBrightness = 0.65f,
+                highlightRatio = 0.65f,
+                darkRatio = 0.05f
+            )
             MockPolicyScenario.MOTION_FIRST -> metrics.copy(motionScore = 0.85f)
             MockPolicyScenario.LOW_NOISE -> metrics.copy(motionScore = 0.10f)
             else -> metrics
@@ -277,7 +282,7 @@ object PolicyDemo {
             reason = if (unavailable) "model_timeout" else "mock_semantic",
             sourceFrameId = metrics.frameId,
             receivedAtEpochMs = nowEpochMs,
-            expiresAtEpochMs = if (unavailable) null else nowEpochMs + 4_000L
+            expiresAtEpochMs = if (unavailable) null else nowEpochMs + 60_000L
         )
     }
 

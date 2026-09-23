@@ -24,7 +24,9 @@ data class RealFramePayload(
  * uses [readJpeg] with bytes produced by the GO Ultra preview stream.
  */
 object RealFrameImageReader {
-    private const val MAX_EDGE = 1_280
+    private const val MAX_UPLOAD_EDGE = 1_280
+    private const val MAX_METRICS_EDGE = 320
+    private const val MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
     fun read(
         contentResolver: ContentResolver,
@@ -76,8 +78,12 @@ object RealFrameImageReader {
             if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) {
                 throw IOException("Unable to encode camera frame")
             }
+            val jpeg = output.toByteArray()
+            if (jpeg.size > MAX_IMAGE_BYTES) {
+                throw IOException("Representative frame exceeds D's 4 MiB image limit")
+            }
             RealFramePayload(
-                imageBase64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP),
+                imageBase64 = Base64.encodeToString(jpeg, Base64.NO_WRAP),
                 metrics = metrics,
                 metricsUi = VisionMetricsUi(
                     frameId = metrics.frameId,
@@ -95,8 +101,8 @@ object RealFrameImageReader {
 
     private fun resizeIfNeeded(bitmap: Bitmap): Bitmap {
         val edge = max(bitmap.width, bitmap.height)
-        if (edge <= MAX_EDGE) return bitmap
-        val scale = MAX_EDGE.toFloat() / edge.toFloat()
+        if (edge <= MAX_UPLOAD_EDGE) return bitmap
+        val scale = MAX_UPLOAD_EDGE.toFloat() / edge.toFloat()
         return Bitmap.createScaledBitmap(
             bitmap,
             (bitmap.width * scale).toInt().coerceAtLeast(1),
@@ -111,30 +117,30 @@ object RealFrameImageReader {
         nowEpochMs: Long,
         source: FrameSource
     ): VisionMetrics {
-        val sampleStep = max(1, max(normalized.width, normalized.height) / 160)
+        val metricsBitmap = resizeForMetrics(normalized)
         var total = 0.0
         var samples = 0
         var highlights = 0
         var dark = 0
-        val pixels = IntArray(normalized.width)
+        val pixels = IntArray(metricsBitmap.width)
 
-        var y = 0
-        while (y < normalized.height) {
-            normalized.getPixels(pixels, 0, normalized.width, 0, y, normalized.width, 1)
-            var x = 0
-            while (x < normalized.width) {
-                val color = pixels[x]
-                val red = (color shr 16) and 0xff
-                val green = (color shr 8) and 0xff
-                val blue = color and 0xff
-                val luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0
-                total += luminance
-                samples += 1
-                if (luminance >= 0.90) highlights += 1
-                if (luminance <= 0.20) dark += 1
-                x += sampleStep
+        try {
+            for (y in 0 until metricsBitmap.height) {
+                metricsBitmap.getPixels(pixels, 0, metricsBitmap.width, 0, y, metricsBitmap.width, 1)
+                for (x in 0 until metricsBitmap.width) {
+                    val color = pixels[x]
+                    val red = (color shr 16) and 0xff
+                    val green = (color shr 8) and 0xff
+                    val blue = color and 0xff
+                    val luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0
+                    total += luminance
+                    samples += 1
+                    if (luminance >= 0.98) highlights += 1
+                    if (luminance <= 0.12) dark += 1
+                }
             }
-            y += sampleStep
+        } finally {
+            if (metricsBitmap !== normalized) metricsBitmap.recycle()
         }
 
         val average = if (samples == 0) 0.5 else total / samples
@@ -143,8 +149,9 @@ object RealFrameImageReader {
         return VisionMetrics(
             frameId = frameId,
             source = source,
-            roiVersion = "full-frame-luminance",
-            subjectBrightness = average.toFloat(),
+            roiVersion = "none",
+            // The preview adapter currently has no tracked, reliable subject ROI.
+            subjectBrightness = null,
             backgroundBrightness = average.toFloat(),
             highlightRatio = highlightRatio.toFloat(),
             darkRatio = darkRatio.toFloat(),
@@ -155,6 +162,18 @@ object RealFrameImageReader {
             } else {
                 LOCAL_FRAME_VALIDITY_MS
             }
+        )
+    }
+
+    private fun resizeForMetrics(bitmap: Bitmap): Bitmap {
+        val edge = max(bitmap.width, bitmap.height)
+        if (edge <= MAX_METRICS_EDGE) return bitmap
+        val scale = MAX_METRICS_EDGE.toFloat() / edge.toFloat()
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).toInt().coerceAtLeast(1),
+            (bitmap.height * scale).toInt().coerceAtLeast(1),
+            true
         )
     }
 

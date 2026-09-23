@@ -65,7 +65,7 @@ class FrontendPolicyBridgeTest {
     }
 
     @Test
-    fun naturalLanguageCanStrengthenSubjectIntentBeforeCorePolicyRuns() {
+    fun sourceTextIsNotParsedIntoCameraPolicy() {
         val result = bridge.analyze(
             shootingState = ShootingUiState(
                 selectedIntent = ShootingIntent.BALANCED,
@@ -76,9 +76,9 @@ class FrontendPolicyBridgeTest {
             nowEpochMs = now
         )
 
-        assertEquals("LOCAL_KEYWORD", result.userIntentUi.source)
-        assertEquals(0.9, result.userIntentUi.subjectPriority, 0.0)
-        assertEquals(PolicyAction.EV_ONE_STEP_UP, result.coreProposal.action)
+        assertEquals("CONFIRMED_FIXED_ENUM", result.userIntentUi.source)
+        assertEquals(0.6, result.userIntentUi.subjectPriority, 0.0)
+        assertEquals(PolicyAction.HOLD, result.coreProposal.action)
     }
 
     @Test

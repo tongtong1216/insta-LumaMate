@@ -14,6 +14,28 @@ import kotlin.test.assertTrue
 
 class PolicyCoordinatorTest {
     @Test
+    fun highStabilityRequiresFiveLocalFrames() {
+        val coordinator = PolicyCoordinator(
+            temporalController = TemporalController(cooldownMs = 0L)
+        )
+        val intent = TestFixtures.intent(exposureStability = 0.9f, highStability = true)
+
+        val results = (1L..5L).map { index ->
+            coordinator.evaluate(
+                realInput(
+                    intent,
+                    "frame-${index.toString().padStart(3, '0')}",
+                    TestFixtures.NOW + index * 100L
+                )
+            )
+        }
+
+        assertFalse(results[3].canRequestConfirmation)
+        assertEquals("awaiting_confirmation_4_of_5", results[3].temporalDecision.reason)
+        assertTrue(results[4].canRequestConfirmation)
+    }
+
+    @Test
     fun requiresThreeFramesBeforeRealConfirmation() {
         val coordinator = PolicyCoordinator(
             temporalController = TemporalController(
@@ -122,7 +144,7 @@ class PolicyCoordinatorTest {
             semantic = TestFixtures.semantic(frameId = frameId).copy(
                 reason = "backend",
                 receivedAtEpochMs = nowEpochMs,
-                expiresAtEpochMs = nowEpochMs + 4_000L
+                expiresAtEpochMs = nowEpochMs + 60_000L
             ),
             cameraState = TestFixtures.cameraState(),
             capabilities = TestFixtures.capabilities(),

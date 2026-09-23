@@ -39,7 +39,9 @@ class PolicyCoordinator(
             metrics = input.metrics,
             candidateAction = candidate.action,
             candidateSignature = candidateSignature(candidate),
-            nowEpochMs = input.nowEpochMs
+            nowEpochMs = input.nowEpochMs,
+            requiredConfirmationFrames = if (input.intent.highStability) 5 else 3,
+            requiredCooldownMs = if (input.intent.highStability) 5_000L else 3_000L
         )
 
         if (candidate.action == PolicyAction.HOLD || !temporal.ready) {

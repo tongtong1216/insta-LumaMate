@@ -318,7 +318,7 @@ fun ShootingScreen(
 
                     Text(
                         text =
-                            "高光占比：${toPercent(metrics.highlightRatio)}"
+                            "高光裁剪占比：${toPercent(metrics.highlightRatio)}"
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
