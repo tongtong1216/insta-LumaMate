@@ -52,7 +52,7 @@ class Insta360CameraSnapshotReader(
         }
         val supportParam = parameters.mapTo(linkedSetOf()) { it.name }
         val fingerprint = parameters.joinToString("|") { parameter ->
-            "${parameter.name}:${parameter.supported.joinToString(",")}" 
+            "${parameter.name}:${parameter.supported.joinToString(",")}"
         }
         if (fingerprint != lastCapabilityFingerprint) {
             lastCapabilityFingerprint = fingerprint
