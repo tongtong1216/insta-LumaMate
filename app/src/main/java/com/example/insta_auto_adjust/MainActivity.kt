@@ -1,9 +1,13 @@
 package com.example.insta_auto_adjust
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
@@ -12,6 +16,8 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -32,8 +38,35 @@ import com.example.insta_auto_adjust.ui.screen.ReportScreen
 import com.example.insta_auto_adjust.ui.screen.ShootingScreen
 import com.example.insta_auto_adjust.ui.theme.InstaAutoAdjustTheme
 import com.example.insta_auto_adjust.intent.LocalKeywordIntentResolver
+import com.example.insta_auto_adjust.camera.contract.CameraSnapshot
+import com.example.insta_auto_adjust.camera.insta360.CameraConnectionState
+import com.example.insta_auto_adjust.camera.insta360.ConnectionPhase
+import com.example.insta_auto_adjust.camera.insta360.Insta360ConnectionController
+import com.example.insta_auto_adjust.camera.preview.PreviewUiState
 
 class MainActivity : ComponentActivity() {
+
+    private val cameraController by lazy {
+        Insta360ConnectionController(applicationContext)
+    }
+
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grantResults ->
+        val allGranted = requiredCameraPermissions().all { permission ->
+            grantResults[permission] == true ||
+                checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) {
+            cameraController.initializeAndScan()
+        } else {
+            cameraState = cameraState.copy(
+                connectionStatus = ConnectionStatus.ERROR,
+                dataSource = DataSource.UNAVAILABLE,
+                errorMessage = "需要附近设备和蓝牙权限才能扫描相机",
+            )
+        }
+    }
 
     // =========================================================
     // 当前页面
@@ -82,6 +115,21 @@ class MainActivity : ComponentActivity() {
 
         setContent {
 
+            val connectionState by cameraController.state.collectAsState()
+            val previewState by cameraController.previewState.collectAsState()
+
+            LaunchedEffect(connectionState) {
+                cameraState = connectionState.toCameraUiState()
+            }
+
+            // GO Ultra's SDK checks authorization after a real Bluetooth/Wi-Fi connection.
+            // This remains independent of C's analysis and execution flow.
+            LaunchedEffect(connectionState.phase) {
+                if (connectionState.phase == ConnectionPhase.CONNECTED) {
+                    cameraController.requestBleAuthorization()
+                }
+            }
+
             InstaAutoAdjustTheme {
 
                 Scaffold(
@@ -99,9 +147,14 @@ class MainActivity : ComponentActivity() {
 
                             ConnectionScreen(
                                 cameraState = cameraState,
+                                scannedDevices = connectionState.scannedDevices,
 
                                 onConnectClick = {
                                     handleConnectionClick()
+                                },
+
+                                onDeviceSelected = { device ->
+                                    cameraController.connectViaBluetoothWifi(device)
                                 },
 
                                 modifier = Modifier
@@ -164,9 +217,12 @@ class MainActivity : ComponentActivity() {
                                     handleHoldProposal()
                                 },
                                 onBackClick = {
+                                    cameraController.stop()
                                     currentScreen = AppScreen.CONNECTION
                                 },
                                 onPreviewContainerReady = { container ->
+                                    cameraController.attach(container)
+                                    cameraController.start()
                                     /*
                                      * A/B Preview integration point.
                                      *
@@ -181,6 +237,8 @@ class MainActivity : ComponentActivity() {
                                 },
 
                                 onPreviewContainerReleased = {
+                                    cameraController.stop()
+                                    cameraController.detach()
                                     /*
                                      * A 集成时：
                                      *
@@ -191,6 +249,7 @@ class MainActivity : ComponentActivity() {
                                      */
                                 },
 
+                                previewState = previewState,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(innerPadding)
@@ -261,6 +320,8 @@ class MainActivity : ComponentActivity() {
             ConnectionStatus.DISCONNECTED,
             ConnectionStatus.ERROR -> {
 
+                startCameraScan()
+
                 /*
                  * A/B 集成边界：
                  *
@@ -277,11 +338,6 @@ class MainActivity : ComponentActivity() {
                  * 当前 B 分支没有 A 的 camera 模块，因此这里只进入
                  * CONNECTING 展示状态，等待 A 集成真实 Controller。
                  */
-                cameraState = cameraState.copy(
-                    connectionStatus = ConnectionStatus.CONNECTING,
-                    dataSource = DataSource.UNAVAILABLE,
-                    errorMessage = null
-                )
             }
 
             ConnectionStatus.CONNECTING -> {
@@ -307,6 +363,49 @@ class MainActivity : ComponentActivity() {
     // =========================================================
     // Mock 画面分析
     // =========================================================
+
+    private fun startCameraScan() {
+        val missingPermissions = requiredCameraPermissions().filter { permission ->
+            checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isEmpty()) {
+            cameraController.initializeAndScan()
+        } else {
+            cameraPermissionLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
+
+    private fun requiredCameraPermissions(): List<String> = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.NEARBY_WIFI_DEVICES,
+        )
+
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+        )
+
+        else -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (currentScreen == AppScreen.SHOOTING && cameraState.isRealCameraConnected) {
+            cameraController.start()
+        }
+    }
+
+    override fun onStop() {
+        cameraController.stop()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        cameraController.close()
+        super.onDestroy()
+    }
 
     private fun handleMockAnalysis() {
 
@@ -560,4 +659,26 @@ class MainActivity : ComponentActivity() {
 
         currentScreen = AppScreen.SHOOTING
     }
+}
+
+private fun CameraConnectionState.toCameraUiState(): CameraUiState {
+    val cameraSnapshot: CameraSnapshot? = snapshot
+    val connected = phase == ConnectionPhase.CONNECTED
+    return CameraUiState(
+        connectionStatus = when (phase) {
+            ConnectionPhase.IDLE -> ConnectionStatus.DISCONNECTED
+            ConnectionPhase.SCANNING,
+            ConnectionPhase.CONNECTING_BLE,
+            ConnectionPhase.CONNECTING_WIFI -> ConnectionStatus.CONNECTING
+            ConnectionPhase.CONNECTED -> ConnectionStatus.CONNECTED
+            ConnectionPhase.FAILED -> ConnectionStatus.ERROR
+        },
+        connectedCameraName = connectedCameraName,
+        mode = cameraSnapshot?.state?.mode,
+        currentEv = cameraSnapshot?.state?.currentEv,
+        supportedEv = cameraSnapshot?.capabilities?.supportedEv.orEmpty(),
+        frameSource = cameraSnapshot?.state?.frameSource?.name,
+        dataSource = if (connected) DataSource.REAL else DataSource.UNAVAILABLE,
+        errorMessage = if (phase == ConnectionPhase.FAILED) message else null,
+    )
 }

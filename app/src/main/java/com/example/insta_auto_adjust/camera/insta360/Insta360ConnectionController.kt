@@ -11,6 +11,7 @@ import android.net.wifi.WifiNetworkSpecifier
 import android.util.Log
 import com.arashivision.inskmp.insble.data.BleDeviceCore
 import com.arashivision.sdk.camera.InstaCameraSDK
+import com.arashivision.sdk.media.InstaMediaSDK
 import com.arashivision.sdk.camera.api.CameraCapture
 import com.arashivision.sdk.camera.api.CameraDevice
 import com.arashivision.sdk.camera.api.param.listener.AuthorizationListener
@@ -30,6 +31,7 @@ import com.example.insta_auto_adjust.camera.contract.FrameSource
 import com.example.insta_auto_adjust.camera.contract.PolicyProposal
 import com.example.insta_auto_adjust.camera.contract.RecordingState
 import com.example.insta_auto_adjust.camera.contract.SafetyDecision
+import com.example.insta_auto_adjust.camera.diagnostics.CameraDiagnosticLogger
 import com.example.insta_auto_adjust.camera.preview.CameraPreviewController
 import com.example.insta_auto_adjust.camera.preview.PreviewUiState
 import kotlinx.coroutines.CoroutineScope
@@ -81,6 +83,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val diagnostics = CameraDiagnosticLogger(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val sessionContext = CameraSessionContext()
     private var initialized = false
@@ -105,6 +108,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
         application = appContext as Application,
         deviceProvider = { cameraDevice },
         sessionContext = sessionContext,
+        diagnostics = diagnostics,
     )
 
     private val _state = MutableStateFlow(CameraConnectionState())
@@ -158,16 +162,22 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
 
     /** Must be called only after the runtime Bluetooth permissions were granted. */
     fun initializeAndScan() {
+        diagnostics.info("connection.initializeAndScan", "initialized=$initialized")
         if (!initialized) {
             InstaCameraSDK.init(appContext as Application) {
                 cacheDir = appContext.externalCacheDir?.absolutePath
             }
+            // The player calls GraphicPath native methods during prepare(). Camera SDK init alone
+            // does not load them; this mirrors the official demo's two-SDK initialization order.
+            InstaMediaSDK.init(appContext as Application)
             initialized = true
+            diagnostics.info("connection.sdkInit.succeeded", "camera+media")
         }
         scan()
     }
 
     private fun scan() {
+        diagnostics.info("connection.scan.start")
         scanDevice?.stopScan()
         val scanner = CameraDevice.get(ConnectType.BLE)
         scanDevice = scanner
@@ -178,13 +188,17 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
         scanner.scan(
             SCAN_TIMEOUT_MS,
             object : BleScanCallback {
-                override fun onStarted() = Unit
+                override fun onStarted() {
+                    diagnostics.info("connection.scan.sdkStarted")
+                }
 
                 override fun onScanning(bleDevice: BleDeviceCore) {
+                    diagnostics.info("connection.scan.deviceFound", bleDevice.name ?: "unnamed")
                     addScannedDevice(bleDevice)
                 }
 
                 override fun onFinished(bleDeviceList: List<BleDeviceCore>) {
+                    diagnostics.info("connection.scan.finished", "count=${bleDeviceList.size}")
                     _state.update {
                         // The user may have selected a camera before the scan timeout. Do not
                         // let this late callback overwrite a connection that is already running.
@@ -201,6 +215,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
                 }
 
                 override fun onError(throwable: Throwable) {
+                    diagnostics.error("connection.scan.failed", throwable)
                     _state.update {
                         it.copy(
                             phase = ConnectionPhase.FAILED,
@@ -213,6 +228,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     }
 
     fun connectViaBluetoothWifi(device: BleCameraDevice) {
+        diagnostics.info("connection.requested", "device=${device.name}")
         connectionJob?.cancel()
         scanDevice?.stopScan()
         scanDevice = null
@@ -228,20 +244,25 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
             val bleCamera = CameraDevice.get(ConnectType.BLE)
             try {
                 bleCamera.connect(device.sdkDevice, false).getOrThrow()
+                diagnostics.info("connection.bluetooth.connected", "device=${device.name}")
                 ensureAccessPointMode(bleCamera)
                 val wifiData = bleCamera.system.getWifiData().getOrThrow()
+                diagnostics.info("connection.cameraWifi.received")
                 _state.update { it.copy(phase = ConnectionPhase.CONNECTING_WIFI, message = "正在连接相机 Wi‑Fi…") }
                 val network = requestCameraNetwork(wifiData.ssid, wifiData.pwd)
                     ?: error("系统未能连接到相机 Wi‑Fi")
+                diagnostics.info("connection.cameraWifi.networkAvailable")
                 if (!connectivityManager.bindProcessToNetwork(network)) {
                     error("无法将应用网络绑定到相机 Wi‑Fi")
                 }
+                diagnostics.info("connection.cameraWifi.processBound")
                 bleCamera.release()
 
                 val wifiCamera = CameraDevice.get(ConnectType.WIFI)
                 wifiCamera.connect(network.networkHandle).getOrThrow()
                 attachConnectedCamera(wifiCamera, device.name)
             } catch (error: Throwable) {
+                diagnostics.error("connection.failed", error, "device=${device.name}")
                 runCatching { bleCamera.release() }
                 clearNetworkBinding()
                 _state.update {
@@ -257,9 +278,11 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     /** Requests the authorization flow required by GO 3S and GO Ultra. */
     fun requestBleAuthorization() {
         val device = cameraDevice ?: return
+        diagnostics.info("connection.authorization.checkRequested")
         scope.launch {
             device.registerAuthorizationListener(authorizationListener)
             val result = device.checkAuthorization()
+            diagnostics.info("connection.authorization.checkResult", result.toString())
             _state.update {
                 it.copy(authorizationMessage = "蓝牙授权状态：${result.getOrNull() ?: result.exceptionOrNull()?.message}")
             }
@@ -298,6 +321,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     }
 
     fun disconnect() {
+        diagnostics.info("connection.disconnect.requested")
         connectionJob?.cancel()
         connectionJob = null
         snapshotPollingJob?.cancel()
@@ -317,6 +341,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     }
 
     fun close() {
+        diagnostics.info("connection.close")
         disconnect()
         scope.cancel()
     }
@@ -331,10 +356,17 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
 
     private suspend fun ensureAccessPointMode(bleCamera: CameraDevice) {
         val currentMode = bleCamera.system.fetchWifiData().getOrNull()?.mode
-        if (currentMode == WiFiData.Mode.AP) return
+        if (currentMode == WiFiData.Mode.AP) {
+            diagnostics.info("connection.cameraWifi.apMode.alreadySet")
+            return
+        }
+        diagnostics.info("connection.cameraWifi.apMode.switchRequested", "from=$currentMode")
         bleCamera.system.setWifiMode(WiFiData.Mode.AP, "").getOrThrow()
         repeat(AP_MODE_POLL_COUNT) {
-            if (bleCamera.system.fetchWifiData().getOrNull()?.mode == WiFiData.Mode.AP) return
+            if (bleCamera.system.fetchWifiData().getOrNull()?.mode == WiFiData.Mode.AP) {
+                diagnostics.info("connection.cameraWifi.apMode.ready")
+                return
+            }
             delay(AP_MODE_POLL_INTERVAL_MS)
         }
         error("相机未能切换到 AP Wi‑Fi 模式")
@@ -342,6 +374,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
 
     private suspend fun requestCameraNetwork(ssid: String, password: String): Network? {
         if (!wifiManager.isWifiEnabled) error("手机 Wi‑Fi 未开启")
+        diagnostics.info("connection.cameraWifi.networkRequest")
         clearNetworkBinding()
         return suspendCancellableCoroutine { continuation ->
             val request = NetworkRequest.Builder()
@@ -362,9 +395,15 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
                     continuation.resume(network)
                 }
 
-                override fun onAvailable(network: Network) = resumeOnce(network)
+                override fun onAvailable(network: Network) {
+                    diagnostics.info("connection.cameraWifi.networkAvailable")
+                    resumeOnce(network)
+                }
 
-                override fun onUnavailable() = resumeOnce(null)
+                override fun onUnavailable() {
+                    diagnostics.warn("connection.cameraWifi.networkUnavailable")
+                    resumeOnce(null)
+                }
             }
             wifiNetworkCallback = callback
             connectivityManager.requestNetwork(request, callback)
@@ -373,6 +412,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     }
 
     private fun attachConnectedCamera(device: CameraDevice, deviceName: String) {
+        diagnostics.info("connection.sdkWifi.connected", "device=$deviceName")
         cameraDevice?.unregisterDisconnectListener(disconnectListener)
         cameraDevice = device
         device.registerDisconnectListener(disconnectListener)
@@ -394,6 +434,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPrev
     }
 
     private fun handleDisconnected(message: String) {
+        diagnostics.warn("connection.disconnected", message)
         snapshotPollingJob?.cancel()
         snapshotPollingJob = null
         previewController.onCameraDisconnected(message)

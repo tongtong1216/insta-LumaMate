@@ -161,3 +161,65 @@ INSTA360_MAVEN_PASSWORD
 ```
 
 若需要无网络构建或大量成员高速下载，应由团队在确认影石 SDK 许可允许后配置受控的内部 Maven 缓存；不要从 Demo APK 提取 AAR 作为依赖。
+
+## 7. 已验证的本机真机预览环境（Windows）
+
+以下配置已用于本项目的 Insta360 GO Ultra 实时预览真机验证。路径是当前开发机的示例；其他成员应按自己的安装位置调整，且不得提交 `local.properties` 或个人环境变量。
+
+| 项目 | 已验证配置 |
+| --- | --- |
+| Android SDK | `D:\Android\Sdk` |
+| ADB | `D:\Android\Sdk\platform-tools\adb.exe` |
+| Android Studio Embedded JDK | `D:\Androir studio\jbr`（OpenJDK `25.0.3`） |
+| Gradle 用户缓存 | `C:\Users\32529\.gradle` |
+| 真机 | Android 10（API 29）或更高，已开启开发者选项与 USB 调试 |
+| 相机 SDK | `com.arashivision.sdk:sdk-camera:2.1.5` |
+| 媒体/预览 SDK | `com.arashivision.sdk:sdk-media:2.1.5` |
+
+### 7.1 PowerShell 构建与安装
+
+若终端没有自动识别 JDK 或 ADB，可在项目根目录使用以下命令。`JAVA_HOME` 和 `GRADLE_USER_HOME` 只在当前终端会话生效。
+
+```powershell
+$env:JAVA_HOME = 'D:\Androir studio\jbr'
+$env:GRADLE_USER_HOME = 'C:\Users\32529\.gradle'
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+
+& 'D:\Android\Sdk\platform-tools\adb.exe' devices
+& 'D:\Android\Sdk\platform-tools\adb.exe' install -r `
+  '.\app\build\outputs\apk\debug\app-debug.apk'
+```
+
+`adb devices` 必须显示 `device`。若显示 `unauthorized`，请解锁手机并在“允许 USB 调试”对话框中允许当前电脑；建议勾选“始终允许”。若反复掉线，先在开发者选项中撤销 USB 调试授权，重新插拔数据线后再授权。
+
+### 7.2 实时预览的 SDK 初始化要求
+
+实时预览同时依赖相机 SDK 和媒体 SDK。应用在取得蓝牙权限后、开始扫描前必须完成以下初始化，缺少第二项会导致播放器 `prepare()` 阶段出现 `OffsetUtil.getLensType` 的 `UnsatisfiedLinkError`：
+
+```kotlin
+InstaCameraSDK.init(application) {
+    cacheDir = application.externalCacheDir?.absolutePath
+}
+InstaMediaSDK.init(application)
+```
+
+预览播放器 `InstaCapturePlayerView` 必须绑定宿主 `Lifecycle`；否则可能已经执行 `prepare()` 与 `play()`，但始终不会进入 `onLoadingFinish`，因此无法绑定渲染管线或收到首帧。
+
+真机验证流程：授予附近设备/蓝牙和附近 Wi-Fi 权限 → 扫描并选择 GO Ultra → 连接相机 Wi-Fi → 进入拍摄助手。预览区域只有在 SDK 的 `onFirstFrameRendered` 回调到达后，才可视为实时预览验证成功。
+
+### 7.3 持久化诊断日志
+
+相机连接与预览日志会写入手机的应用专属目录，可在 USB 临时断开后保留。日志不应记录相机 Wi-Fi 密码。
+
+```text
+/sdcard/Android/data/com.example.insta_auto_adjust/files/logs/camera/camera-runtime.log
+```
+
+日志自动轮转，保留最近 3 份、每份最多 512 KB。重新连接 USB 后可读取：
+
+```powershell
+& 'D:\Android\Sdk\platform-tools\adb.exe' shell cat `
+  /sdcard/Android/data/com.example.insta_auto_adjust/files/logs/camera/camera-runtime.log
+```
+
+重点查看 `preview.player.prepareFailed`、`preview.pipeline.bound`、`preview.firstFrameRendered` 和 `preview.player.loadingTimeout` 事件。
