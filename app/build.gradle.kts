@@ -33,6 +33,7 @@ android {
 
 dependencies {
     implementation(libs.insta360.camera)
+    implementation(libs.insta360.media)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)

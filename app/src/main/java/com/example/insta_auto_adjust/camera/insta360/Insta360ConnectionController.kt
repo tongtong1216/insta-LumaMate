@@ -30,6 +30,8 @@ import com.example.insta_auto_adjust.camera.contract.FrameSource
 import com.example.insta_auto_adjust.camera.contract.PolicyProposal
 import com.example.insta_auto_adjust.camera.contract.RecordingState
 import com.example.insta_auto_adjust.camera.contract.SafetyDecision
+import com.example.insta_auto_adjust.camera.preview.CameraPreviewController
+import com.example.insta_auto_adjust.camera.preview.PreviewUiState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -74,26 +76,13 @@ data class BleCameraDevice(
  * Minimal, real GO Ultra connection flow. It owns the SDK device and exposes snapshots only from
  * [Insta360CameraSnapshotReader], never from a presentation-layer cache.
  */
-class Insta360ConnectionController(context: Context) : CameraAdapter {
+class Insta360ConnectionController(context: Context) : CameraAdapter, CameraPreviewController {
     private val appContext = context.applicationContext
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val sessionContext = CameraSessionContext()
-    private val snapshotReader = Insta360CameraSnapshotReader(
-        deviceProvider = { cameraDevice },
-        sessionContext = sessionContext,
-        captureRuntimeProvider = { captureRuntimeState },
-    )
-    private val commandExecutor = Insta360CameraCommandExecutor(
-        deviceProvider = { cameraDevice },
-        snapshotReader = snapshotReader,
-    )
-
-    private val _state = MutableStateFlow(CameraConnectionState())
-    val state: StateFlow<CameraConnectionState> = _state.asStateFlow()
-
     private var initialized = false
     private var cameraDevice: CameraDevice? = null
     private var wifiNetworkCallback: ConnectivityManager.NetworkCallback? = null
@@ -103,6 +92,26 @@ class Insta360ConnectionController(context: Context) : CameraAdapter {
     private var snapshotReadInProgress = false
     private var attachedCapture: CameraCapture? = null
     private var captureRuntimeState = CaptureRuntimeState()
+    private val snapshotReader = Insta360CameraSnapshotReader(
+        deviceProvider = { cameraDevice },
+        sessionContext = sessionContext,
+        captureRuntimeProvider = { captureRuntimeState },
+    )
+    private val commandExecutor = Insta360CameraCommandExecutor(
+        deviceProvider = { cameraDevice },
+        snapshotReader = snapshotReader,
+    )
+    private val previewController = Insta360CameraPreviewController(
+        application = appContext as Application,
+        deviceProvider = { cameraDevice },
+        sessionContext = sessionContext,
+    )
+
+    private val _state = MutableStateFlow(CameraConnectionState())
+    val state: StateFlow<CameraConnectionState> = _state.asStateFlow()
+
+    override val previewState: StateFlow<PreviewUiState>
+        get() = previewController.previewState
 
     private val captureStatusListener = object : CaptureStatusListener {
         override fun onCaptureStarting(functionMode: FunctionMode) =
@@ -293,6 +302,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter {
         connectionJob = null
         snapshotPollingJob?.cancel()
         snapshotPollingJob = null
+        previewController.onCameraDisconnected("已断开连接")
         val device = cameraDevice
         cameraDevice = null
         detachCaptureStatusListener()
@@ -310,6 +320,14 @@ class Insta360ConnectionController(context: Context) : CameraAdapter {
         disconnect()
         scope.cancel()
     }
+
+    override fun attach(container: android.view.ViewGroup) = previewController.attach(container)
+
+    override fun start() = previewController.start()
+
+    override fun stop() = previewController.stop()
+
+    override fun detach() = previewController.detach()
 
     private suspend fun ensureAccessPointMode(bleCamera: CameraDevice) {
         val currentMode = bleCamera.system.fetchWifiData().getOrNull()?.mode
@@ -378,6 +396,7 @@ class Insta360ConnectionController(context: Context) : CameraAdapter {
     private fun handleDisconnected(message: String) {
         snapshotPollingJob?.cancel()
         snapshotPollingJob = null
+        previewController.onCameraDisconnected(message)
         cameraDevice = null
         detachCaptureStatusListener()
         sessionContext.markDisconnected()

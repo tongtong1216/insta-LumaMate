@@ -15,6 +15,7 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 insta360-camera = { group = "com.arashivision.sdk", name = "sdk-camera", version.ref = "insta360Sdk" }
+insta360-media = { group = "com.arashivision.sdk", name = "sdk-media", version.ref = "insta360Sdk" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
