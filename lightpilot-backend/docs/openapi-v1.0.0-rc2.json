@@ -1,0 +1,397 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LightPilot Backend",
+    "description": "Scene semantics only. Mock/unavailable results require Android HOLD.",
+    "version": "1.0.0-rc2"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analyze-scene": {
+      "post": {
+        "summary": "Analyze Scene",
+        "operationId": "analyze_scene_api_v1_analyze_scene_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeSceneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneSemantic"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeSceneRequest": {
+        "properties": {
+          "frame_id": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Frame Id"
+          },
+          "intent_revision": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Intent Revision"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/Intent"
+          },
+          "image_base64": {
+            "type": "string",
+            "maxLength": 5592440,
+            "minLength": 1,
+            "title": "Image Base64"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Metrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "frame_id",
+          "intent_revision",
+          "intent",
+          "image_base64"
+        ],
+        "title": "AnalyzeSceneRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Intent": {
+        "properties": {
+          "exposure_priority": {
+            "type": "string",
+            "enum": [
+              "subject_detail",
+              "highlight_detail",
+              "balanced"
+            ],
+            "title": "Exposure Priority"
+          },
+          "stability_preference": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "high"
+            ],
+            "title": "Stability Preference"
+          },
+          "source_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "exposure_priority",
+          "stability_preference"
+        ],
+        "title": "Intent"
+      },
+      "Metrics": {
+        "properties": {
+          "subject_brightness": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Brightness"
+          },
+          "background_brightness": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Brightness"
+          },
+          "highlight_clipping_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Highlight Clipping Ratio"
+          },
+          "dark_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dark Ratio"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Metrics"
+      },
+      "SceneSemantic": {
+        "properties": {
+          "frame_id": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Frame Id"
+          },
+          "intent_revision": {
+            "type": "integer",
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Intent Revision"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "mock",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "scene": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "indoor_even_light",
+                  "indoor_mixed_light",
+                  "indoor_low_light",
+                  "indoor_backlit",
+                  "outdoor_daylight",
+                  "outdoor_backlit",
+                  "night_low_light",
+                  "stage_colored_light",
+                  "high_contrast_other",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene"
+          },
+          "subject_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "person",
+                  "group",
+                  "display",
+                  "document",
+                  "object",
+                  "landscape",
+                  "none",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Type"
+          },
+          "bright_region_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "sky",
+                  "window",
+                  "display",
+                  "lamp",
+                  "specular_reflection",
+                  "mixed",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bright Region Type"
+          },
+          "colored_light": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colored Light"
+          },
+          "uncertainty": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 12,
+            "title": "Uncertainty"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "frame_id",
+          "intent_revision",
+          "status"
+        ],
+        "title": "SceneSemantic"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

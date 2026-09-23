@@ -39,5 +39,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Insta-auto_adjust"
-include(":app")
- 
+include(":app", ":core")

@@ -56,6 +56,22 @@ Android Studio 2026.1 会根据该条件自动使用匹配的 Embedded JDK，因
 
 `local.properties` 会由 Android Studio 自动写入本机 SDK 路径；每个人的路径不同，不需要修改或提交它。
 
+### 2.4 macOS 终端环境
+
+如果 Android Studio 安装在默认位置，在项目根目录的终端执行：
+
+```sh
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+./gradlew :app:assembleDebug :app:testDebugUnitTest --console=plain
+```
+
+这些环境变量只影响当前终端，不会更改其他项目使用的全局 Java。新开终端后需重新执行以上 `export` 命令。SDK 安装在其他位置时，请同步调整 `ANDROID_HOME` 与 `local.properties` 中的 `sdk.dir`。
+
+构建成功后，调试 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`，单元测试报告位于 `app/build/reports/tests/testDebugUnitTest/index.html`。这两项验证不需要连接设备；安装启动与设备测试仍需要真机或已配置的模拟器。
+
 ## 3. 首次 Gradle Sync
 
 打开项目后 Android Studio 会自动执行 Gradle Sync。若需要手动触发，按 `Ctrl + Shift + A`，搜索并执行 `Sync Project with Gradle Files`。
@@ -116,6 +132,8 @@ BUILD SUCCESSFUL
 
 模拟器只用于确认 UI 和基础构建；相机连接、预览和 EV 调节必须使用真实 Android 手机与真实相机另行验证。
 
+本机模拟器与华为手机的连接、安装及排查步骤见 [DEVICE_TESTING.md](DEVICE_TESTING.md)。
+
 ## 5. 通过标准
 
 满足以下全部条件，即可认为本机环境与团队环境同步成功：
@@ -123,7 +141,7 @@ BUILD SUCCESSFUL
 - Gradle JVM criteria 的 Version 为 25，Distribution 为 Wrapper。
 - 已安装 API 37 与 Build-Tools 37.0.0。
 - Gradle Sync 显示 `BUILD SUCCESSFUL`，没有红色错误。
-- 空 App 能在模拟器或真机启动。
+- LightPilot P0 App 能在模拟器或真机启动。
 - `gradle-wrapper.properties` 中没有任何个人本地磁盘路径。
 
 ## 6. Insta360 Android SDK 2.1.5 获取与团队配置
@@ -223,3 +241,21 @@ InstaMediaSDK.init(application)
 ```
 
 重点查看 `preview.player.prepareFailed`、`preview.pipeline.bound`、`preview.firstFrameRendered` 和 `preview.player.loadingTimeout` 事件。
+
+## 8. C/D 后端本机测试环境（Windows）
+
+当前开发机使用 `D:\Python\python.exe`（Python `3.13.5`）创建
+`lightpilot-backend\.venv`。后端声明要求 Python 3.11 或更高；虚拟环境、`.env`、pytest
+临时目录均不得提交。
+
+```powershell
+cd lightpilot-backend
+& 'D:\Python\python.exe' -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp -p no:cacheprovider
+.\.venv\Scripts\python.exe -m pip check
+```
+
+使用项目内 `--basetemp=.pytest-tmp` 可避免受限系统临时目录导致的 Windows `PermissionError`。
+默认 `.env.example` 使用 Mock 模式，不会调用百炼；真实模型密钥仅可保存在
+`lightpilot-backend\.env`，不得写入 Android 配置、日志或 Git。

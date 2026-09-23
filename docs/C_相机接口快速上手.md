@@ -152,6 +152,41 @@ when (result.status) {
 ## 6. 当前边界
 
 - 已真机验证读取与 EV、ISO、快门、白平衡的合法目标逐档写入。
-- `frameSource` 当前仍可能是 `UNKNOWN`，不能假定已经接入真实预览帧。
+- Android 已增加无 UI 的 GO Ultra 实时预览帧适配器：SDK 预览流中的 H.264/H.265 帧会在后台解码为 JPEG，再交给 D v1 场景分析接口。
+- 手机不显示预览不代表没有预览帧；C 只能根据 `VisionMetrics.source = SDK_DECODED` 判断是否收到可分析的真实帧。
+- Android 真实 D 联调路径的单帧分析窗口为 `35_000 ms`，对应 D 协议允许的 30 秒模型超时和 Android 请求余量；核心模块默认的严格 1.5 秒测试规则不变。
 - `recordingState == UNKNOWN`、`isWorking == null` 等不可确认状态应按不安全处理。
 - 本接口不含测试 UI、固定预设值或 Mock 执行逻辑。
+
+## 7. 无 UI 实时帧链路
+
+当前 Android 主流程为：
+
+```text
+GO Ultra 连接成功
+→ CameraStreamListener.onStreamDataNotify
+→ MediaCodec 后台解码
+→ JPEG + VisionMetrics
+→ POST /api/v1/analyze-scene
+→ SceneSemantic
+→ PolicyEngine / SafetyGuard
+→ 用户确认
+→ CameraAdapter.executeConfirmed
+```
+
+实现类：
+
+```text
+app/.../camera/insta360/Insta360RealtimePreviewFrameSource.kt
+app/.../network/RealFrameImageReader.kt
+```
+
+`Insta360RealtimePreviewFrameSource` 不创建 `InstaCapturePlayerView`，因此不会要求手机显示预览。它复用已经连接的 `CameraDevice`，不会新建第二条 BLE/Wi-Fi 连接。
+
+联调时应看到：
+
+```text
+实时预览帧已接入：frame_id=<数字>
+```
+
+如果没有收到帧，Android 不会回退到相册图片或拍照下载，而是保持安全状态并提示实时预览流未就绪。

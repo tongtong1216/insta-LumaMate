@@ -41,6 +41,7 @@ enum class ProposalDecision {
  * 不是 C 的 PolicyEngine 数据结构。
  */
 data class ShootingUiState(
+    val dataSource: DataSource = DataSource.MOCK,
 
     // ------------------------------------------------------------
     // B：快捷拍摄意图
@@ -110,6 +111,13 @@ data class ShootingUiState(
     // ------------------------------------------------------------
 
     val proposal: PolicyProposalUi? = null,
+
+    // 当前建议是否满足真实执行条件。
+    // 没有实时相机帧时，建议仍可展示，但不能进入真实执行。
+    val proposalExecutable: Boolean = false,
+
+    // 建议暂时不能执行时，向用户说明阻塞原因。
+    val proposalBlockReason: String? = null,
 
 
     // ------------------------------------------------------------

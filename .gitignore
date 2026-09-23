@@ -1,6 +1,10 @@
 *.iml
 .gradle
+**/build/
+**/bin/
+**/.kotlin/
 /local.properties
+/.idea/
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -16,3 +20,7 @@
 local.properties
 doc/
 SDK/
+/.tmp_sdk_inspect/
+/.tmp_camera_stream_javap.txt
+/.tmp_platform_stream_javap.txt
+/classes.jar
