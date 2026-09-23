@@ -141,7 +141,7 @@ BUILD SUCCESSFUL
 - Gradle JVM criteria 的 Version 为 25，Distribution 为 Wrapper。
 - 已安装 API 37 与 Build-Tools 37.0.0。
 - Gradle Sync 显示 `BUILD SUCCESSFUL`，没有红色错误。
-- 空 App 能在模拟器或真机启动。
+- LightPilot P0 App 能在模拟器或真机启动。
 - `gradle-wrapper.properties` 中没有任何个人本地磁盘路径。
 
 ## 6. Insta360 Android SDK 2.1.5 获取与团队配置

@@ -11,6 +11,8 @@ def test_health_and_openapi(mock_app):
     }
     spec = mock_app.get("/openapi.json").json()
     assert "/api/v1/analyze-scene" in spec["paths"]
+    assert "/api/v1/parse-intent" in spec["paths"]
+    assert spec["info"]["version"] == "1.0.0-rc3"
     assert spec["components"]["schemas"]["SceneSemantic"]["properties"]["status"]["enum"] == [
         "ok", "mock", "unavailable"]
     assert mock_app.get("/docs").status_code == 200

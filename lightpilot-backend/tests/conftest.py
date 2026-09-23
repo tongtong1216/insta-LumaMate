@@ -17,9 +17,12 @@ def payload():
     image = io.BytesIO()
     Image.new("RGB", (32, 32), (80, 100, 120)).save(image, format="PNG")
     return {
-        "frame_id": 42, "intent_revision": 7, "intent": "保留夜景氛围",
+        "frame_id": 42, "intent_revision": 7,
+        "intent": {"exposure_priority": "highlight_detail",
+                   "stability_preference": "normal", "source_text": "保留夜景氛围"},
         "image_base64": base64.b64encode(image.getvalue()).decode(),
-        "metrics": {"subject_brightness": 0.25, "highlight_ratio": 0.05, "dark_ratio": 0.4},
+        "metrics": {"subject_brightness": 0.25, "background_brightness": 0.5,
+                    "highlight_clipping_ratio": 0.05, "dark_ratio": 0.4},
     }
 
 
@@ -28,7 +31,11 @@ def semantic():
     return {
         "scene": "night_low_light", "subject_type": "person",
         "bright_region_type": "lamp", "colored_light": True,
-        "uncertainty": ["主体部分遮挡"], "reason": "霓虹灯形成彩色照明",
+        "uncertainty_details": [{
+            "code": "subject_occluded", "severity": "warning",
+            "affects": ["subject_type", "subject_roi"], "message": "主体部分遮挡",
+        }],
+        "reason": "霓虹灯形成彩色照明",
     }
 
 

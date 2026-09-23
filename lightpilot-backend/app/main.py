@@ -7,7 +7,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.bailian_client import BailianClient
 from app.config import Settings
-from app.schemas import MAX_BODY_BYTES, AnalyzeSceneRequest, SceneSemantic
+from app.schemas import (
+    MAX_BODY_BYTES, AnalyzeSceneRequest, ParseIntentRequest, ParseIntentResponse, SceneSemantic,
+)
 from app.service import SceneService
 
 
@@ -73,8 +75,9 @@ def create_app(settings: Settings | None = None, *, client: BailianClient | None
             if model_client is not None:
                 await model_client.close()
 
-    app = FastAPI(title="LightPilot Backend", version="1.0.0-rc1", lifespan=lifespan,
-                  description="Scene semantics only. Mock/unavailable results require Android HOLD.")
+    app = FastAPI(title="LightPilot Backend", version="1.0.0-rc3", lifespan=lifespan,
+                  description=("Structured multi-stage intent parsing and scene semantics. "
+                               "Mock/unavailable results require Android HOLD."))
     app.add_middleware(RequestLimits)
 
     @app.exception_handler(RequestValidationError)
@@ -94,6 +97,10 @@ def create_app(settings: Settings | None = None, *, client: BailianClient | None
     @app.post("/api/v1/analyze-scene", response_model=SceneSemantic)
     async def analyze_scene(req: AnalyzeSceneRequest, request: Request):
         return await request.app.state.scene_service.analyze(req)
+
+    @app.post("/api/v1/parse-intent", response_model=ParseIntentResponse)
+    async def parse_intent(req: ParseIntentRequest, request: Request):
+        return await request.app.state.scene_service.parse_intent(req)
 
     return app
 

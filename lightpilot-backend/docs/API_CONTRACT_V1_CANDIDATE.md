@@ -1,56 +1,121 @@
 # LightPilot Android ↔ D 后端 API v1 候选协议
 
-- 协议版本：`1.0.0-rc1`
-- 状态：候选，等待 B/C 确认与三类真实图片验收
-- 负责方：D（后端与模型接入）
-- 最后更新：2026-09-22
+- 协议版本：`1.0.0-rc3`
+- 状态：候选，等待 B/C 联调、真实图片和视频验收
+- 负责方：D（意图解析、场景语义和协议校验）
+- 最后更新：2026-09-23
 
-本文件是 B、C、D 的唯一候选接口约定。正式冻结后，v1 不再增加、删除或改名字段，也不再改变枚举值和字段语义；破坏性修改进入 `/api/v2`。
+rc3 在 rc2 的单帧场景接口上增加多阶段意图解析和字段级不确定性。rc2 客户端仍可读取
+原有字段并在 `uncertainty` 非空时整帧 `HOLD`；rc3 客户端只使用
+`uncertainty_details.code/affects/severity` 制定字段级降级策略。四方验收通过后才标记为
+`1.0.0`，之后的破坏性修改进入 `/api/v2`。
 
 ## 1. 接口
 
-### 健康检查
+- `GET /health`：进程和配置状态，不证明云端调用成功。
+- `POST /api/v1/parse-intent`：用百炼把用户文本解析成三个独立权重和固定枚举。
+- `POST /api/v1/analyze-scene`：分析一张代表帧并返回场景语义。
 
-`GET /health`
+所有 POST 请求使用 `Content-Type: application/json`，额外字段一律拒绝。
 
-该接口只证明后端进程和配置状态可读取，不证明云端模型调用成功。
+## 2. 多阶段意图解析
 
-### 场景分析
+请求：
 
-`POST /api/v1/analyze-scene`
+```json
+{
+  "request_id": "24d45a9a-2f84-4c80-93c3-62e3c097ea5b",
+  "source_text": "夜间跑步时拍清楚人物，同时保留霓虹灯颜色"
+}
+```
 
-请求头：`Content-Type: application/json`
+`request_id` 由 Android 生成 UUID。`source_text` 为 1–1000 个非空字符。
 
-## 2. Android 请求
+成功响应：
+
+```json
+{
+  "request_id": "24d45a9a-2f84-4c80-93c3-62e3c097ea5b",
+  "status": "ok",
+  "intent": {
+    "weights": {
+      "exposure": 0.8,
+      "motion_noise": 0.95,
+      "color_atmosphere": 0.85
+    },
+    "exposure_priority": "subject_detail",
+    "motion_priority": "motion_clarity",
+    "color_priority": "colored_light_preservation",
+    "stability_preference": "high"
+  },
+  "ambiguities": [],
+  "reason": "用户同时强调人物清晰、运动冻结和霓虹氛围"
+}
+```
+
+三个权重分别位于 `[0,1]`，互相独立，不要求总和为 1。权重 `>=0.50` 的阶段激活。
+未激活阶段的 priority 可以为 `null`；已激活阶段无法确定 priority 时必须为 `null`，
+并在 `ambiguities` 中要求用户手动选择。只有用户确认所有激活阶段后，B 才递增
+`intent_revision`。解析失败进入手动选择，不生成相机动作。
+
+固定枚举：
+
+```text
+exposure_priority: subject_detail, highlight_detail, balanced
+motion_priority: motion_clarity, low_noise, brightness_priority, motion_balanced
+color_priority: color_accuracy, natural_skin, atmosphere_preservation,
+                colored_light_preservation, color_stability
+stability_preference: normal, high
+```
+
+Mapper 严格拒绝非数字、布尔权重、NaN、Infinity、越界值、缺失字段、额外字段和未知枚举，
+不做字符串猜测或自动裁剪。模型不能提供或修改 `request_id`，也不能返回 EV、ISO、快门、
+白平衡、相机动作或 SDK 方法。
+
+## 3. 场景分析请求
 
 ```json
 {
   "frame_id": 152,
   "intent_revision": 3,
-  "intent": "优先拍清楚主体，同时尽量保留背景灯光",
+  "intent": {
+    "exposure_priority": "subject_detail",
+    "stability_preference": "normal",
+    "source_text": "优先拍清楚人物，同时尽量保留背景灯光"
+  },
   "image_base64": "...",
   "metrics": {
     "subject_brightness": 0.31,
-    "highlight_ratio": 0.08,
+    "background_brightness": 0.68,
+    "highlight_clipping_ratio": 0.08,
     "dark_ratio": 0.42
   }
 }
 ```
 
-| 字段 | 类型 | 必填 | 约束与含义 |
-| --- | --- | --- | --- |
-| `frame_id` | Int64 | 是 | 非负；A/C 为每个提交帧生成单调递增编号 |
-| `intent_revision` | Int64 | 是 | 非负；B 每次改变有效拍摄意图时递增 |
-| `intent` | String | 是 | 去除首尾空白后 1–1000 字符 |
-| `image_base64` | String | 是 | JPEG、PNG 或 WebP 的纯 Base64 或对应 data URL |
-| `metrics` | Object/null | 否 | C 计算的归一化指标；缺失时 D 仍可分析图片 |
-| `metrics.subject_brightness` | Float/null | 否 | `[0,1]`，主体亮度 |
-| `metrics.highlight_ratio` | Float/null | 否 | `[0,1]`，高亮区域占比 |
-| `metrics.dark_ratio` | Float/null | 否 | `[0,1]`，暗部区域占比 |
+| 字段 | 约束与含义 |
+| --- | --- |
+| `frame_id` | 非负 Int64；代表帧编号 |
+| `intent_revision` | 非负 Int64；用户确认的意图版本 |
+| `intent` | 保留 rc2 结构；供图片模型理解语境，不负责多阶段策略 |
+| `image_base64` | JPEG、PNG、WebP 的 Base64 或 data URL |
+| `metrics` | 可整体缺失；存在的数值必须位于 `[0,1]` |
 
-额外字段一律拒绝。图片解码后最大 4 MiB、1600 万像素；请求体最大 6 MiB。Android 使用 `Base64.NO_WRAP`。后端会在内存中把长边超过 1280 像素或带 ICC 色彩配置的图片规范化为最长边 1280 像素的 sRGB JPEG，不修改或保存原图。
+指标亮度定义：
 
-## 3. D 返回
+```text
+L = (0.2126R + 0.7152G + 0.0722B) / 255
+```
+
+- `subject_brightness`：可靠主体 ROI 平均 L，无可靠 ROI 时为 `null`。
+- `background_brightness`：主体外区域平均 L，无 ROI 时为全画面平均值。
+- `highlight_clipping_ratio`：全画面 `L >= 0.98` 的像素比例。
+- `dark_ratio`：全画面 `L <= 0.12` 的像素比例。
+
+C 可将最长边缩小到 320 像素再计算。图片解码后最大 4 MiB、1600 万像素，请求体最大
+6 MiB；后端只在内存中把长边超过 1280 或带 ICC 的图片转换为 sRGB JPEG。
+
+## 4. 场景分析响应
 
 ```json
 {
@@ -61,150 +126,112 @@
   "subject_type": "person",
   "bright_region_type": "display",
   "colored_light": false,
-  "uncertainty": [],
+  "uncertainty": ["主体被树叶部分遮挡"],
+  "uncertainty_details": [
+    {
+      "code": "subject_occluded",
+      "severity": "warning",
+      "affects": ["subject_type", "subject_roi"],
+      "message": "主体被树叶部分遮挡"
+    }
+  ],
   "reason": "主体较暗，背景存在明显高亮显示区域"
 }
 ```
 
-| 字段 | 类型 | 含义 |
-| --- | --- | --- |
-| `frame_id` | Int64 | D 从原始请求绑定并原样返回，模型不能提供或修改 |
-| `intent_revision` | Int64 | D 从原始请求绑定并原样返回，模型不能提供或修改 |
-| `status` | Enum | `ok`、`mock` 或 `unavailable` |
-| `scene` | Enum/null | 固定光照场景枚举 |
-| `subject_type` | Enum/null | 固定主体类别枚举 |
-| `bright_region_type` | Enum/null | 固定主要亮区来源枚举 |
-| `colored_light` | Boolean/null | 是否存在明显影响主体或场景的彩色光 |
-| `uncertainty` | String[] | `ok` 时为不确定性说明；失败时首项为稳定错误码 |
-| `reason` | String/null | 中文人工解释，仅供 B 展示、日志诊断和人工验收 |
+`frame_id` 和 `intent_revision` 由服务端从请求绑定，模型不能提供或修改。`reason` 和
+`uncertainty_details[].message` 都是展示文本，C 不解析自然语言制定策略。
 
-`reason` 是非策略字段。C 不得搜索、匹配或解析 `reason` 文本来决定曝光、EV 或相机动作。
-
-## 4. 固定枚举
-
-### `scene`
-
-| 值 | 含义 |
-| --- | --- |
-| `indoor_even_light` | 室内整体光照较均匀 |
-| `indoor_mixed_light` | 室内存在多种光源、色温或明显亮暗区域 |
-| `indoor_low_light` | 室内整体低照度 |
-| `indoor_backlit` | 室内主体前景较暗、背景明显更亮 |
-| `outdoor_daylight` | 室外日光，未形成显著逆光问题 |
-| `outdoor_backlit` | 室外主体相对背景明显逆光 |
-| `night_low_light` | 夜间或近似夜间的低照度环境 |
-| `stage_colored_light` | 舞台、演出或明显彩色灯光环境 |
-| `high_contrast_other` | 不属于上述类别的高反差环境 |
-| `other` | 图像可分析，但不属于上述场景 |
-
-### `subject_type`
-
-| 值 | 含义 |
-| --- | --- |
-| `person` | 单人是主要主体 |
-| `group` | 多人群体是主要主体 |
-| `display` | 屏幕、显示器或投影内容是主要主体 |
-| `document` | 纸张、书页或文字材料是主要主体 |
-| `object` | 普通物体或商品是主要主体 |
-| `landscape` | 风景或整体环境是主要主体 |
-| `none` | 没有可识别的主要主体 |
-| `other` | 有主体，但不属于上述类别 |
-
-### `bright_region_type`
-
-| 值 | 含义 |
-| --- | --- |
-| `none` | 没有明显集中亮区 |
-| `sky` | 天空是主要亮区 |
-| `window` | 窗口或门外区域是主要亮区 |
-| `display` | 显示屏或投影是主要亮区 |
-| `lamp` | 灯具、灯牌或主动发光装置是主要亮区 |
-| `specular_reflection` | 镜面、高光或反射是主要亮区 |
-| `mixed` | 同时存在多个不同来源的主要亮区 |
-| `other` | 有明显亮区，但不属于上述类别 |
-
-模型无法可靠判断时返回 `null`，并在 `uncertainty` 中解释；不得创造新枚举或使用中文同义词替代枚举。
-
-## 5. 状态与 HTTP 行为
-
-| HTTP/状态 | 含义 | Android 行为 |
-| --- | --- | --- |
-| `200 / ok` | 模型结果完整并通过 Pydantic 校验 | 再检查两个编号，交给 C |
-| `200 / mock` | 仅为联调模拟结果，语义字段为 null | 显示 Mock，HOLD |
-| `200 / unavailable` | 云端超时、限流、鉴权、连接、格式或容量异常 | HOLD，可按错误码提示或退避 |
-| `413` | 请求体超过 6 MiB | 缩小代表帧，HOLD |
-| `415` | Content-Type 不是 JSON | 修正客户端请求 |
-| `422` | JSON、字段、指标或图片非法 | 修正客户端请求，HOLD |
-
-`unavailable` 时所有语义字段为 null，`uncertainty[0]` 是以下稳定错误码之一：
-
-`model_not_configured`、`timeout`、`rate_limited`、`authentication_failed`、`connection_failed`、`invalid_model_response`、`model_unavailable`、`backend_busy`、`internal_error`。
-
-后端模型总超时为 30 秒。Android 请求超时建议至少 35 秒，并限制为最多一个在途分析请求，避免旧帧堆积。
-
-## 6. 视频处理约定
-
-v1 不接收 MP4、MOV 或整段视频 Base64。视频由 Android 抽取代表帧，每个代表帧仍使用 `POST /api/v1/analyze-scene`。这样不会把大视频上传到 D，也避免长请求占满后端。
-
-D 的视频职责：
-
-- 维持单帧接口、严格枚举和稳定错误码；
-- 使用 `temperature=0` 降低同类帧的随机输出差异；
-- 提供 `scripts.video_probe`，供 D 在电脑上对本地视频均匀抽帧并生成验收报告；
-- 报告记录每帧时间戳、编号、HTTP 状态、协议有效性、枚举、`reason`、延迟和枚举切换；
-- 不在服务端保存视频或抽出的临时帧。
-
-Android/C 的运行时职责：
-
-- 实时亮度、高光、暗部与场景变化检测在设备端完成；
-- 用户意图变化、镜头切换或指标显著变化时选择一张代表帧调用 D；
-- 同一时间最多一个在途模型请求，只保留最新待分析代表帧；
-- 对 D 返回的枚举做时序确认和 Safety Guard，不能因单帧标签变化立即执行危险动作。
-
-D 本地视频验收命令：
-
-```bash
-.venv/bin/python -m scripts.video_probe \
-  --video "/absolute/path/to/video.mp4" \
-  --samples 6 \
-  --output "test-results/video-probe-report.json"
-```
-
-工具依赖本机 `ffmpeg` 与 `ffprobe`。它会在视频时长内均匀选择 1–10 帧，最长边缩放到 1280 像素，顺序请求真实后端，并输出 JSON 报告。报告中的 `transitions` 只表示标签发生变化；是否合理需要结合对应时间点画面人工判断。
-
-## 7. 过期结果处理
-
-Android 维护：
-
-- `currentIntentRevision`：B 当前意图版本；
-- `latestRequestedFrameId`：当前意图下最后提交给 D 的帧；
-- `lastAppliedFrameId`：C 已应用的最后一帧。
-
-响应满足以下全部条件才能进入 C：
+`affects` 固定为：
 
 ```text
-status == "ok"
-response.intent_revision == currentIntentRevision
-response.frame_id == latestRequestedFrameId
-response.frame_id > lastAppliedFrameId
+scene, subject_type, subject_roi, bright_region_type, colored_light,
+image_quality, all
 ```
 
-任一条件不满足即丢弃并保持当前安全状态。D 是无会话服务，只负责回传原始编号；过期判断由 Android 完成。
+`severity` 固定为 `warning` 或 `blocking`。服务失败使用 `blocking + affects=[all]`。
+模型语义 code 固定为：
 
-## 8. B、C、D 职责边界
+```text
+scene_uncertain, subject_type_uncertain, subject_occluded,
+bright_region_uncertain, colored_light_uncertain, image_blur,
+image_too_dark, image_quality_uncertain, other
+```
 
-- B：维护用户意图与 `intent_revision`，展示状态、枚举和 `reason`。
-- C：生成指标，核对编号，只使用固定枚举、布尔值、指标和 `uncertainty` 做策略输入；执行 Safety Guard。
-- D：校验请求、调用模型、约束模型 JSON、绑定原始编号、返回稳定失败码。
-- A：提供相机帧、能力与实际操作接口；D 不返回 EV、动作或 SDK 方法。
+服务失败码包括：
 
-## 9. 候选协议转正式冻结条件
+```text
+model_not_configured, model_not_connected, timeout, rate_limited,
+authentication_failed, connection_failed, invalid_model_response,
+model_unavailable, backend_busy, internal_error
+```
 
-- B、C 确认字段可空性、枚举含义、HOLD 和过期丢弃规则；
-- 普通室内、暗主体亮背景、强光或彩色光三类真实图片各连续调用 3 次；
-- 三类测试均为 HTTP 200、`status=ok`、稳定 JSON，枚举合法，`reason` 基于画面；
-- 至少一段包含光照或构图变化的视频完成 6–10 帧抽样，报告中的标签切换经人工确认合理；
-- timeout、429、非法响应和编号过期路径均由测试覆盖；
-- Android DTO 与本文件一致。
+`uncertainty` 保留为兼容字符串数组。rc2 客户端看到非空数组继续整帧 `HOLD`；rc3 客户端：
 
-满足上述条件后，将状态改为 `Frozen`、版本改为 `1.0.0`。此后任何字段、可空性、枚举值或状态语义的破坏性修改都进入 `/api/v2`。
+- `blocking`、`affects=all`、模型失败：全部阶段 `HOLD`；
+- 主体类别或 ROI 不确定：只阻断依赖人物/ROI 的策略；
+- `colored_light` 不确定：只阻断依赖彩色光的阶段三策略；
+- 无关 warning 仍展示，但不阻断阶段二全局运动策略。
+
+场景固定枚举仍与 rc2 相同：
+
+```text
+scene: indoor_even_light, indoor_mixed_light, indoor_low_light, indoor_backlit,
+       outdoor_daylight, outdoor_backlit, night_low_light, stage_colored_light,
+       high_contrast_other, other
+subject_type: person, group, display, document, object, landscape, none, other
+bright_region_type: none, sky, window, display, lamp, specular_reflection, mixed, other
+```
+
+## 5. C 的缓存和仲裁约定
+
+响应进入缓存前必须满足：
+
+```text
+status == ok
+response.intent_revision == currentIntentRevision
+response.frame_id == latestRequestedModelFrameId
+没有 blocking 或 affects=all
+```
+
+同时最多一个模型请求；语义缓存最长 60 秒。意图、相机重连、模式变化或关键亮度指标变化
+达到 0.20 时立即失效。三帧/五帧确认只使用 C 的本地指标，不连续请求 D。
+
+三个阶段独立生成候选，分数为 `stage_weight × urgency`。仲裁器每轮最多选择一个动作；
+前两名差值 `<0.10` 时 `HOLD/MULTI_OBJECTIVE_CONFLICT`。最高权重阶段因能力、Mock、模式
+或语义依赖被阻断时，不静默执行低权重动作。阶段二、三在真机执行器验收前始终为
+`MOCK/planning_only`。
+
+## 6. HTTP 和失败处理
+
+| HTTP/状态 | 客户端处理 |
+| --- | --- |
+| `200/ok` | 严格解析并核对请求编号 |
+| `200/mock` | 显示 Mock，禁止执行 |
+| `200/unavailable` | 显示失败，意图改手选或场景整阶段 HOLD |
+| `422` | 字段不符合 rc3，修正后重试 |
+| `413` | 缩小代表帧 |
+| `415` | 改用 JSON |
+
+## 7. 视频和验收报告
+
+`scripts.video_probe` 只抽取本地视频代表帧，不上传整段视频。`scripts.three_stage_probe`
+的每阶段摘要分为：
+
+```text
+contract_passed  接口、模型状态和编号正确
+stage_usable     该阶段依赖字段可用
+field_stability  各语义字段的独立稳定性记录
+```
+
+阶段二不会因无关的 `subject_type` 或 `colored_light` 波动直接失败；字段波动仍记录，供使用
+这些字段的阶段查看。验收命令见 `D_THREE_STAGE_TEST_GUIDE.md`。
+
+## 8. 责任边界
+
+- B：调用意图解析、让用户补选并确认、维护 `intent_revision`、展示警告。
+- C：本地指标、字段依赖、候选评分、冲突仲裁、时序和 SafetyGuard。
+- A：真实能力、模式切换、单参数写入和写后回读。
+- D：百炼意图解析、图片语义、固定枚举、结构化不确定性和失败归一化。
+
+四方验收完成前保持 `1.0.0-rc3`，不宣称 API v1 已冻结。

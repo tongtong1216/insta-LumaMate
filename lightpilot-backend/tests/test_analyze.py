@@ -35,7 +35,8 @@ def test_live_adapter_and_server_owned_ids(live_app, payload, semantic):
 
     client = live_app(upstream)
     data = client.post(PATH, json=payload).json()
-    assert data == dict(semantic, frame_id=42, intent_revision=7, status="ok")
+    assert data == dict(semantic, uncertainty=["主体部分遮挡"],
+                        frame_id=42, intent_revision=7, status="ok")
     assert len(requests) == 1
     sent = json.loads(requests[0].content)
     assert requests[0].url.path == "/v1/chat/completions"
@@ -88,6 +89,19 @@ def test_model_cannot_invent_semantic_enum_values(live_app, payload, semantic):
     assert data["uncertainty"] == ["invalid_model_response"]
 
 
+def test_model_cannot_impersonate_service_failure_codes(live_app, payload, semantic):
+    invented = dict(semantic)
+    invented["uncertainty_details"] = [{
+        "code": "timeout", "severity": "blocking", "affects": ["all"],
+        "message": "模型声称服务超时",
+    }]
+    client = live_app(lambda request: httpx.Response(
+        200, json=completion(json.dumps(invented))))
+    data = client.post(PATH, json=payload).json()
+    assert data["status"] == "unavailable"
+    assert data["uncertainty"] == ["invalid_model_response"]
+
+
 @pytest.mark.parametrize("extra", [{"frame_id": 99}, {"ev": 2}, {"status": "ok"}, {"sdk_method": "setEV"}])
 def test_model_cannot_inject_ids_or_actions(live_app, payload, semantic, extra):
     result = json.dumps(dict(semantic, **extra))
@@ -124,17 +138,22 @@ def test_wall_clock_timeout(live_app, payload, semantic):
 
 @pytest.mark.parametrize("changes", [
     {"frame_id": -1}, {"frame_id": True}, {"frame_id": "42"},
-    {"intent_revision": -1}, {"intent": "   "}, {"intent": "x" * 1001},
+    {"intent_revision": -1}, {"intent": "旧版自由文本"},
+    {"intent": {"exposure_priority": "portrait", "stability_preference": "normal"}},
+    {"intent": {"exposure_priority": "balanced", "stability_preference": "fast"}},
+    {"intent": {"exposure_priority": "balanced", "stability_preference": "normal",
+                "source_text": "x" * 1001}},
     {"image_base64": "not base64"}, {"image_base64": base64.b64encode(b"not an image").decode()},
     {"metrics": {"dark_ratio": 1.1}}, {"metrics": {"subject_brightness": -0.1}},
-    {"metrics": {"highlight_ratio": "0.2"}}, {"extra": "unsupported"},
+    {"metrics": {"highlight_clipping_ratio": "0.2"}},
+    {"metrics": {"highlight_ratio": 0.2}}, {"extra": "unsupported"},
 ])
 def test_invalid_requests_do_not_echo_private_data(mock_app, payload, changes):
     data = dict(payload, **changes)
     response = mock_app.post(PATH, json=data)
     assert response.status_code == 422
     assert payload["image_base64"] not in response.text
-    assert payload["intent"] not in response.text
+    assert payload["intent"]["source_text"] not in response.text
     assert all("input" not in error for error in response.json()["detail"])
 
 
@@ -148,7 +167,11 @@ def test_image_data_url_and_mime_mismatch(mock_app, payload):
 def test_large_image_is_normalized_for_model_without_changing_request_contract():
     source = io.BytesIO()
     Image.new("RGB", (1600, 800), (90, 120, 150)).save(source, format="PNG")
-    request = AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent="测试",
+    request = AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent={
+                                      "exposure_priority": "balanced",
+                                      "stability_preference": "normal",
+                                      "source_text": "测试",
+                                  },
                                   image_base64=base64.b64encode(source.getvalue()).decode())
 
     assert request.image_data_url.startswith("data:image/jpeg;base64,")

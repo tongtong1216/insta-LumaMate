@@ -7,6 +7,7 @@ import io
 import json
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 from PIL import Image
@@ -14,7 +15,8 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from app.bailian_client import BailianClient
 from app.config import Settings
-from app.schemas import MAX_IMAGE_BYTES, AnalyzeSceneRequest, SceneSemantic
+from app.schemas import (MAX_IMAGE_BYTES, AnalyzeSceneRequest, Intent, ParseIntentResponse,
+                         SceneSemantic)
 from app.service import FAILURE_REASONS, SceneService
 
 
@@ -30,7 +32,8 @@ def error_code(exc: Exception) -> str:
     return "check_failed"
 
 
-def make_request(image_path: Path | None, intent: str) -> AnalyzeSceneRequest:
+def make_request(image_path: Path | None, intent: str, exposure_priority: str,
+                 stability_preference: str) -> AnalyzeSceneRequest:
     if image_path:
         if image_path.stat().st_size > MAX_IMAGE_BYTES:
             raise ValueError("Image must be at most 4 MiB")
@@ -39,7 +42,11 @@ def make_request(image_path: Path | None, intent: str) -> AnalyzeSceneRequest:
         buffer = io.BytesIO()
         Image.new("RGB", (32, 32), (80, 100, 120)).save(buffer, format="PNG")
         raw = buffer.getvalue()
-    return AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent=intent,
+    return AnalyzeSceneRequest(frame_id=1, intent_revision=1, intent=Intent(
+        exposure_priority=exposure_priority,
+        stability_preference=stability_preference,
+        source_text=intent or None,
+    ),
                                image_base64=base64.b64encode(raw).decode())
 
 
@@ -72,33 +79,38 @@ def build_summary(results: list[SceneSemantic], elapsed_values: list[int]) -> di
 
 async def run(args) -> int:
     settings = Settings.from_env()
-    if args.kind != "backend" and not settings.model_configured:
+    if args.kind in ("text", "vision") and not settings.model_configured:
         print("请先在后端 .env 或环境变量中填写 BAILIAN_API_KEY 与 BAILIAN_BASE_URL。")
         return 1
     if args.kind == "vision" and not args.image:
         print("真实图片冒烟需要 --image /path/to/your/photo.jpg。")
         return 1
-    req = make_request(args.image, args.intent) if args.kind != "text" else None
-    model = BailianClient(settings) if args.kind != "backend" else None
+    req = make_request(
+        args.image,
+        args.intent,
+        getattr(args, "exposure_priority", "balanced"),
+        getattr(args, "stability_preference", "normal"),
+    ) if args.kind in ("backend", "vision") else None
+    model = BailianClient(settings) if args.kind in ("text", "vision") else None
     passed = True
     observed_results = []
     observed_elapsed_ms = []
     try:
         async with httpx.AsyncClient(timeout=settings.timeout_seconds + 5) as http:
-            if args.kind == "backend":
+            if args.kind in ("backend", "intent"):
                 health = await http.get(f"{args.base_url.rstrip('/')}/health")
                 health.raise_for_status()
                 info = health.json()
                 print(json.dumps({"health": info["status"], "mode": info["mode"],
                                   "model": info.get("model"),
                                   "model_configured": info.get("model_configured", False)}))
-                if args.require_live and info["mode"] != "bailian":
+                if (args.require_live or args.kind == "intent") and info["mode"] != "bailian":
                     print(json.dumps({"passed": False, "error_code": "backend_is_mock"}))
                     return 1
-                if args.require_live and not info.get("model_configured", False):
+                if (args.require_live or args.kind == "intent") and not info.get("model_configured", False):
                     print(json.dumps({"passed": False, "error_code": "model_not_configured"}))
                     return 1
-                if info["mode"] == "bailian" and not args.image:
+                if args.kind == "backend" and info["mode"] == "bailian" and not args.image:
                     print("真实模型模式需要 --image；内置纯色测试帧仅用于 Mock 协议检查。")
                     return 1
             for index in range(args.repeat):
@@ -117,6 +129,26 @@ async def run(args) -> int:
                               and not response.choices[0].message.refusal
                               and response.choices[0].message.content.strip() == "LIGHTPILOT_OK")
                     status = "ok" if ok else "unexpected_text"
+                elif args.kind == "intent":
+                    request_id = str(uuid4())
+                    response = await http.post(
+                        f"{args.base_url.rstrip('/')}/api/v1/parse-intent",
+                        json={"request_id": request_id, "source_text": args.intent},
+                    )
+                    http_status = response.status_code
+                    response.raise_for_status()
+                    parsed = ParseIntentResponse.model_validate(response.json())
+                    result = parsed
+                    status = parsed.status
+                    all_active = bool(parsed.intent and all(weight >= 0.5 for weight in (
+                        parsed.intent.weights.exposure,
+                        parsed.intent.weights.motion_noise,
+                        parsed.intent.weights.color_atmosphere,
+                    )))
+                    ok = (status == "ok" and parsed.request_id == request_id
+                          and (not args.expect_all_stages or all_active))
+                    if not ok:
+                        failure = "expected_three_active_stages" if args.expect_all_stages else "invalid_intent"
                 else:
                     req.frame_id = index + 1
                     if args.kind == "backend":
@@ -146,8 +178,9 @@ async def run(args) -> int:
                     record["http_status"] = http_status
                 if getattr(args, "show_result", False) and result is not None:
                     record["result"] = result.model_dump()
-                    observed_results.append(result)
-                    observed_elapsed_ms.append(elapsed_ms)
+                    if isinstance(result, SceneSemantic):
+                        observed_results.append(result)
+                        observed_elapsed_ms.append(elapsed_ms)
                 print(json.dumps(record, ensure_ascii=False))
             if getattr(args, "show_result", False) and observed_results:
                 print(json.dumps({"summary": build_summary(
@@ -165,15 +198,21 @@ async def run(args) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--kind", choices=["backend", "text", "vision"], default="backend")
+    parser.add_argument("--kind", choices=["backend", "text", "vision", "intent"], default="backend")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--image", type=Path)
     parser.add_argument("--intent", default="保留现场光照氛围")
+    parser.add_argument("--exposure-priority",
+                        choices=["subject_detail", "highlight_detail", "balanced"],
+                        default="balanced")
+    parser.add_argument("--stability-preference", choices=["normal", "high"], default="normal")
     parser.add_argument("--repeat", type=int, default=3, choices=range(1, 11))
     parser.add_argument("--require-live", action="store_true",
                         help="Backend mode must be bailian; never accept Mock as an integration pass")
     parser.add_argument("--show-result", action="store_true",
                         help="Print validated semantic fields and a stability summary; never print the image or key")
+    parser.add_argument("--expect-all-stages", action="store_true",
+                        help="For --kind intent, require all three weights to be >= 0.50")
     args = parser.parse_args()
     try:
         code = asyncio.run(run(args))

@@ -15,7 +15,8 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.schemas import AnalyzeSceneRequest, SceneSemantic
+from app.schemas import AnalyzeSceneRequest, Intent, SceneSemantic
+from scripts.three_stage_probe import STAGE_REQUIRED_FIELDS, result_is_stage_usable
 
 
 def video_duration(path: Path, ffprobe: str) -> float:
@@ -81,11 +82,27 @@ def build_video_summary(frames: list[dict]) -> dict:
                 })
         previous = frame
     elapsed = [frame["elapsed_ms"] for frame in frames]
+    field_stability = {
+        field: len(successful) == len(frames) and len(values) == 1 and values[0] is not None
+        for field, values in distinct_values.items()
+    }
+    stage_usable_frames = {
+        stage: sum(
+            1 for frame in successful if result_is_stage_usable(frame["result"], stage)
+        )
+        for stage in STAGE_REQUIRED_FIELDS
+    }
     return {
         "sampled_frames": len(frames),
         "protocol_valid_frames": len(valid),
         "successful_frames": len(successful),
         "all_frames_ok": len(successful) == len(frames),
+        "contract_passed": len(valid) == len(frames) and len(successful) == len(frames),
+        "stage_usable": {
+            stage: count == len(frames) for stage, count in stage_usable_frames.items()
+        },
+        "stage_usable_frames": stage_usable_frames,
+        "field_stability": field_stability,
         "distinct_values": distinct_values,
         "transitions": transitions,
         "elapsed_ms": {
@@ -141,7 +158,11 @@ async def run(args) -> int:
                     request = AnalyzeSceneRequest(
                         frame_id=frame_id,
                         intent_revision=args.intent_revision,
-                        intent=args.intent,
+                        intent=Intent(
+                            exposure_priority=args.exposure_priority,
+                            stability_preference=args.stability_preference,
+                            source_text=args.intent or None,
+                        ),
                         image_base64=base64.b64encode(frame_path.read_bytes()).decode(),
                     )
                     response = await http.post(
@@ -151,12 +172,17 @@ async def run(args) -> int:
                     record["http_status"] = response.status_code
                     response.raise_for_status()
                     result = SceneSemantic.model_validate(response.json())
+                    dumped = result.model_dump()
                     record.update({
                         "protocol_valid": True,
                         "status": result.status,
                         "error_code": (result.uncertainty[0]
                                        if result.status == "unavailable" and result.uncertainty else None),
-                        "result": result.model_dump(),
+                        "stage_usable": {
+                            stage: result_is_stage_usable(dumped, stage)
+                            for stage in STAGE_REQUIRED_FIELDS
+                        },
+                        "result": dumped,
                     })
                 except httpx.TimeoutException:
                     record.update({"status": "client_timeout", "error_code": "client_timeout"})
@@ -170,11 +196,15 @@ async def run(args) -> int:
                 print(json.dumps(record, ensure_ascii=False), flush=True)
 
     report = {
-        "contract_version": "1.0.0-rc1",
+        "contract_version": "1.0.0-rc3",
         "video_file": args.video.name,
         "duration_ms": round(duration * 1000),
         "intent_revision": args.intent_revision,
-        "intent": args.intent,
+        "intent": {
+            "exposure_priority": args.exposure_priority,
+            "stability_preference": args.stability_preference,
+            "source_text": args.intent,
+        },
         "backend": {
             "mode": health.get("mode"),
             "model": health.get("model"),
@@ -196,6 +226,10 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=6, choices=range(1, 11),
                         help="Evenly sample 1-10 representative frames (default: 6)")
     parser.add_argument("--intent", default="保持主体清晰，同时保留现场光照氛围")
+    parser.add_argument("--exposure-priority",
+                        choices=["subject_detail", "highlight_detail", "balanced"],
+                        default="balanced")
+    parser.add_argument("--stability-preference", choices=["normal", "high"], default="normal")
     parser.add_argument("--intent-revision", type=int, default=1)
     parser.add_argument("--frame-start", type=int, default=1)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
